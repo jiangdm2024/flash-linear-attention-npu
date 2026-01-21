@@ -452,9 +452,6 @@ function build_example()
                     CUST_LIBRARY_PATH="${CUST_VENDORS_PATH}/${vendor_name}_transformer/op_api/lib"
                     CUST_INCLUDE_PATH="${CUST_VENDORS_PATH}/${vendor_name}_transformer/op_api/include"
                 fi
-                ABSOLUTE_MC2_PATH=$(realpath ${BUILD_PATH}/../mc2)
-                ABSOLUTE_EXAMPLES_PATH=$(realpath ${BUILD_PATH}/../examples/mc2)
-                ABSOLUTE_EXPERIMENTAL_MC2_PATH=$(realpath ${BUILD_PATH}/../experimental/mc2)
                 REAL_FILE_PATH=$(realpath "$file")
                 MC2_APPEND_INCLUDE_AND_LIBRARY=""
                 if [[ "$REAL_FILE_PATH" == "${ABSOLUTE_MC2_PATH}"* || "$REAL_FILE_PATH" == "${ABSOLUTE_EXAMPLES_PATH}"* || "$REAL_FILE_PATH" == "${ABSOLUTE_EXPERIMENTAL_MC2_PATH}"* ]]; then
