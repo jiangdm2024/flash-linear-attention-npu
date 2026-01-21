@@ -70,15 +70,15 @@ function(op_add_subdirectory OP_LIST OP_DIR_LIST)
         message(STATUS "Build experimental module")
         file(GLOB OP_HOST_CMAKE_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/experimental/ffn/**/op_host/CMakeLists.txt"
-        "${CMAKE_CURRENT_SOURCE_DIR}/experimental/gmm/**/op_host/CMakeLists.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/experimental/chunk_gated_delta_rule/**/op_host/CMakeLists.txt"
         "${CMAKE_CURRENT_SOURCE_DIR}/experimental/mc2/**/op_host/CMakeLists.txt"
         "${CMAKE_CURRENT_SOURCE_DIR}/experimental/moe/**/op_host/CMakeLists.txt"
         "${CMAKE_CURRENT_SOURCE_DIR}/experimental/posembedding/**/op_host/CMakeLists.txt"
         )
     else()
         file(GLOB OP_HOST_CMAKE_FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/gmm/**/op_host/CMakeLists.txt"
-        "${CMAKE_CURRENT_SOURCE_DIR}/gmm/**/CMakeLists.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/chunk_gated_delta_rule/**/op_host/CMakeLists.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/chunk_gated_delta_rule/**/CMakeLists.txt"
         )
         if(BUILD_OPEN_PROJECT AND (NOT BUILD_OPS_RTY_KERNEL))
             file(GLOB CANNDEV_OPS_HOST_CMAKE_FILES
@@ -354,7 +354,7 @@ endfunction()
 
 function(add_ops_src_copy)
     cmake_parse_arguments(SRC_COPY "" "TARGET_NAME;SRC;DST;BE_RELIED;COMPUTE_UNIT" "" ${ARGN})
-
+    message(">>>>>>${OPS_ADV_UTILS_KERNEL_INC}")
     set(OPS_UTILS_INC_KERNEL_TARGET ops_utils_inc_kernel_${SRC_COPY_COMPUTE_UNIT})
     if (EXISTS ${OPS_ADV_UTILS_KERNEL_INC})
         if (NOT TARGET ${OPS_UTILS_INC_KERNEL_TARGET})
@@ -362,7 +362,7 @@ function(add_ops_src_copy)
             set(OPS_UTILS_INC_KERNEL_DIR ${_ROOT_OPS_SRC_DIR}/ascendc/common)
             add_custom_command(OUTPUT ${OPS_UTILS_INC_KERNEL_DIR}
                     COMMAND mkdir -p ${OPS_UTILS_INC_KERNEL_DIR}/regbase
-                    COMMAND cp -rf ${OPS_ADV_UTILS_KERNEL_INC}/*.* ${OPS_UTILS_INC_KERNEL_DIR}
+                    COMMAND cp -rf ${OPS_ADV_UTILS_KERNEL_INC}/* ${OPS_UTILS_INC_KERNEL_DIR}
             )
 
             add_custom_target(${OPS_UTILS_INC_KERNEL_TARGET}
@@ -761,7 +761,7 @@ function(add_static_ops)
         list(REMOVE_DUPLICATES modified_files)
         add_custom_command(OUTPUT ${static_src_temp_dir}
             COMMAND mkdir -p ${static_src_temp_dir}
-            COMMAND cp -rf ${STATIC_SRC_DIR}/gmm ${STATIC_SRC_DIR}/mc2 ${STATIC_SRC_DIR}/attention ${static_src_temp_dir} || true
+            COMMAND cp -rf ${STATIC_SRC_DIR}/chunk_gated_delta_rule ${STATIC_SRC_DIR}/mc2 ${STATIC_SRC_DIR}/attention ${static_src_temp_dir} || true
             COMMAND ${HI_PYTHON} -B ${OPS_STATIC_SCRIPT} InsertIni -p ${static_src_temp_dir} -f ${modified_files}
         )
 
