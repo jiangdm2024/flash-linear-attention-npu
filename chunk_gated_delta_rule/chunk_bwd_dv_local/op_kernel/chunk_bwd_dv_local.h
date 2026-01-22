@@ -24,12 +24,15 @@ class ChunkBwdDvLocal {
 public:
     __aicore__ inline ChunkBwdDvLocal(){};
     __aicore__ inline void Process();
-    __aicore__ inline void Init(GM_ADDR q, GM_ADDR k, GM_ADDR d_o, GM_ADDR g, GM_ADDR cu_seqlens, GM_ADDR chunk_indices, GM_ADDR d_v, GM_ADDR workspace, const ChunkBwdDvLocalTilingData *__restrict tilingData);
+    __aicore__ inline void Init(GM_ADDR q, GM_ADDR k, GM_ADDR d_o, GM_ADDR g, GM_ADDR upper_tri_matrix, GM_ADDR cu_seqlens, GM_ADDR chunk_indices, GM_ADDR d_v, GM_ADDR workspace, const ChunkBwdDvLocalTilingData *__restrict tilingData);
 };
 
-__aicore__ inline void ChunkBwdDvLocal::Init(GM_ADDR q, GM_ADDR k, GM_ADDR d_o, GM_ADDR g, GM_ADDR cu_seqlens, GM_ADDR chunk_indices, GM_ADDR d_v, GM_ADDR workspace, const ChunkBwdDvLocalTilingData *__restrict tilingData)
+__aicore__ inline void ChunkBwdDvLocal::Init(GM_ADDR q, GM_ADDR k, GM_ADDR d_o, GM_ADDR g, GM_ADDR upper_tri_matrix, GM_ADDR cu_seqlens, GM_ADDR chunk_indices, GM_ADDR d_v, GM_ADDR workspace, const ChunkBwdDvLocalTilingData *__restrict tilingData)
 {
-    
+    // AscendC::GlobalTensor<int8_t> triMatrixGm;
+    // triMatrixGm.SetGlobalBuffer((__gm__ int8_t*)upper_tri_matrix);
+    // AscendC::printf("triMatrixGm.GetValue(0) = %d \n ",triMatrixGm.GetValue(0));
+
 }
 
 __aicore__ inline void ChunkBwdDvLocal::Process( )

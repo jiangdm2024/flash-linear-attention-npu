@@ -22,7 +22,19 @@
 namespace optiling {
 
 BEGIN_TILING_DATA_DEF(ChunkBwdDvLocalTilingData)
-TILING_DATA_FIELD_DEF(int64_t, totalCoreNum);             // 物理总核数
+TILING_DATA_FIELD_DEF(int64_t, b);
+TILING_DATA_FIELD_DEF(int64_t, h);
+TILING_DATA_FIELD_DEF(int64_t, t);
+TILING_DATA_FIELD_DEF(int64_t, k);
+TILING_DATA_FIELD_DEF(int64_t, v);
+TILING_DATA_FIELD_DEF(int64_t, chunkNum);
+TILING_DATA_FIELD_DEF(int64_t, chunkNumPreCore);
+TILING_DATA_FIELD_DEF(int64_t, chunkNumTailCore);
+TILING_DATA_FIELD_DEF(int64_t, preCoreNum);
+TILING_DATA_FIELD_DEF(int64_t, tailCoreNum);
+TILING_DATA_FIELD_DEF(int64_t, totalCoreNum);
+TILING_DATA_FIELD_DEF(int64_t, chunkSize);
+TILING_DATA_FIELD_DEF(float, scale);
 END_TILING_DATA_DEF;
 
 REGISTER_TILING_DATA_CLASS(ChunkBwdDvLocal, ChunkBwdDvLocalTilingData)

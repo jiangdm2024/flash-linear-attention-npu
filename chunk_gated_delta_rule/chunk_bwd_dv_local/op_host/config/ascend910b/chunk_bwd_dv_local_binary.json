@@ -45,9 +45,9 @@
             ]
           },
           {
-            "name": "cu_seqlens",
+            "name": "upper_tri_matrix",
             "index": 4,
-            "dtype": "int64",
+            "dtype": "bool",
             "format": "ND",
             "paramType": "required",
             "shape": [
@@ -55,11 +55,41 @@
             ]
           },
           {
-            "name": "chunk_indices",
+            "name": "g_gamma",
             "index": 5,
+            "dtype": "float32",
+            "format": "ND",
+            "paramType": "optional",
+            "shape": [
+              -2
+            ]
+          },
+          {
+            "name": "A",
+            "index": 6,
+            "dtype": "float16",
+            "format": "ND",
+            "paramType": "optional",
+            "shape": [
+              -2
+            ]
+          },
+          {
+            "name": "cu_seqlens",
+            "index": 7,
             "dtype": "int64",
             "format": "ND",
-            "paramType": "required",
+            "paramType": "optional",
+            "shape": [
+              -2
+            ]
+          },
+          {
+            "name": "chunk_indices",
+            "index": 8,
+            "dtype": "int64",
+            "format": "ND",
+            "paramType": "optional",
             "shape": [
               -2
             ]
@@ -134,9 +164,9 @@
             ]
           },
           {
-            "name": "cu_seqlens",
+            "name": "upper_tri_matrix",
             "index": 4,
-            "dtype": "int64",
+            "dtype": "bool",
             "format": "ND",
             "paramType": "required",
             "shape": [
@@ -144,11 +174,41 @@
             ]
           },
           {
-            "name": "chunk_indices",
+            "name": "g_gamma",
             "index": 5,
+            "dtype": "float32",
+            "format": "ND",
+            "paramType": "optional",
+            "shape": [
+              -2
+            ]
+          },
+          {
+            "name": "A",
+            "index": 6,
+            "dtype": "bfloat16",
+            "format": "ND",
+            "paramType": "optional",
+            "shape": [
+              -2
+            ]
+          },
+          {
+            "name": "cu_seqlens",
+            "index": 7,
             "dtype": "int64",
             "format": "ND",
-            "paramType": "required",
+            "paramType": "optional",
+            "shape": [
+              -2
+            ]
+          },
+          {
+            "name": "chunk_indices",
+            "index": 8,
+            "dtype": "int64",
+            "format": "ND",
+            "paramType": "optional",
             "shape": [
               -2
             ]
