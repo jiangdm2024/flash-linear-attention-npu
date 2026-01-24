@@ -20,7 +20,6 @@ using namespace AscendC;
 
 namespace optiling {
 namespace {
-  ChunkGatedDeltaRuleBwdDhuTilingData chunkGatedDeltaRuleBwdDhuTiling;
   constexpr uint32_t INPUT_Q_IDX = 0;
   constexpr uint32_t INPUT_K_IDX = 1;
   constexpr uint32_t INPUT_W_IDX = 2;
@@ -32,7 +31,6 @@ namespace {
   constexpr uint32_t INPUT_DHT_IDX = 8;
   constexpr uint32_t INPUT_CU_SEQLENS_IDX = 9;
   constexpr uint32_t INPUT_CHUNK_INDICES_IDX = 10;
-  constexpr uint32_t INPUT_TRI_MASK_IDX = 11;
 
   constexpr uint32_t OUTPUT_DH_IDX = 0;
   constexpr uint32_t OUTPUT_DH0_IDX = 1;
@@ -47,7 +45,12 @@ namespace {
   constexpr uint32_t DIM_3 = 3;
   constexpr uint32_t NUM_64 = 64;
   constexpr uint32_t NUM_128 = 128;
+  constexpr uint32_t NUM_2 = 2;
+  constexpr uint32_t NUM_3 = 3;
 
+  constexpr uint32_t HALF_DTYPE_SIZE = 2;
+  constexpr uint32_t FP32_DTYPE_SIZE = 4;
+  constexpr uint32_t INT8_DTYPE_SIZE = 1;
 
   template <typename T> 
   static T CeilDiv(T a, T b) {
@@ -61,41 +64,64 @@ namespace {
 bool ChunkGatedDeltaRuleBwdDhuTiling::Init(gert::TilingContext* context) {
 
   const gert::Shape qShape = context->GetInputShape(INPUT_Q_IDX)->GetStorageShape();
-
   const gert::Shape doShape = context->GetInputShape(INPUT_DO_IDX)->GetStorageShape();
   B = qShape.GetDim(DIM_0);
   H = qShape.GetDim(DIM_1);
   T = qShape.GetDim(DIM_2);
   K = qShape.GetDim(DIM_3);
   V = doShape.GetDim(DIM_3);
-
-  const auto dO = context->GetInputDesc(INPUT_DO_IDX);
   
-  const auto cuSeqlens = context->GetInputDesc(INPUT_CU_SEQLENS_IDX);
-  const auto chunkIndices = context->GetInputDesc(INPUT_CHUNK_INDICES_IDX);
+  auto attrs = context->GetAttrs();
+  OP_CHECK_IF(attrs == nullptr, OP_LOGE(context->GetNodeName(), "attrs is nullptr."), return false);
+  const float *scalePtr = attrs->GetAttrPointer<float>(ATTR_SCALE_IDX);
+  IS_SCALE = scalePtr == nullptr ? false : true;
+  float scale = IS_SCALE ? *scalePtr : 1.0;
+  const uint32_t *chunkSizePtr = attrs->GetAttrPointer<uint32_t>(ATTR_CHUNK_SIZE_IDX);
+  uint32_t chunkSize = chunkSizePtr == nullptr ? NUM_64 : *chunkSizePtr;
+  OP_CHECK_IF(!(chunkSize == NUM_64 || chunkSize == NUM_128), 
+              OP_LOGE(context->GetNodeName(), "chunk_size should be 64 or 128, but got %d.", chunkSize), 
+              return false);
+
+  tilingData.set_B(B);
+  printf("tiling B is %llu\n", tilingData.get_B());
+  tilingData.set_H(H);
+  tilingData.set_T(T);
+  tilingData.set_K(K);
+  tilingData.set_V(V);
+  tilingData.set_isScale(IS_SCALE);
+  tilingData.set_scale(scale);
+  tilingData.set_chunkSize(chunkSize);
+  return true;
+}
+
+bool ChunkGatedDeltaRuleBwdDhuTiling::VarLenSetting(gert::TilingContext* context) {
+  const auto cuSeqlens = context->GetInputTensor(INPUT_CU_SEQLENS_IDX);
+
+  const auto chunkIndices = context->GetInputTensor(INPUT_CHUNK_INDICES_IDX);
 
   if (cuSeqlens != nullptr && chunkIndices != nullptr) {
+    printf("is varlen\n");
     IS_VARIABLE_LEN = true;
   } else if (!(cuSeqlens == nullptr && chunkIndices == nullptr)) {
     OP_LOGE(context->GetNodeName(), 
     "cu_seqlens and chunkIndices must both be provided or both be omitted.");
     return false;
   }
+  tilingData.set_isVarLen(IS_VARIABLE_LEN);
 
-  auto attrs = context->GetAttrs();
-  OP_CHECK_IF(attrs == nullptr, OP_LOGE(context->GetNodeName(), "attrs is nullptr."), return false);
-  const float *scalePtr = attrs->GetAttrPointer<float>(ATTR_SCALE_IDX);
-  IS_SCALE = scalePtr == nullptr ? false : true;
-  const uint32_t *chunkSizePtr = attrs->GetAttrPointer<uint32_t>(ATTR_CHUNK_SIZE_IDX);
-  uint32_t chunkSize = chunkSizePtr == nullptr ? NUM_64 : *chunkSizePtr;
-  OP_CHECK_IF(!(chunkSize == NUM_64 || chunkSize == NUM_128), 
-              OP_LOGE(context->GetNodeName(), "chunk_size should be 64 or 128, but got %d.", chunkSize), 
-              return false);
   if (!IS_VARIABLE_LEN) {
-    chunkNum = CeilDiv(T, chunkSize); 
+    int64_t chunkNum = static_cast<int64_t>(CeilDiv(T, chunkSize)); 
+    tilingData.set_chunkNum(chunkNum);
+    tilingData.set_seqNum(1);
+  } else {
+    auto seqNum = cuSeqlens->GetShapeSize() - 1;
+    auto chunkNum = chunkIndices->GetShapeSize() / 2;
+    tilingData.set_seqNum(seqNum);
+    tilingData.set_chunkNum(chunkNum);
   }
   return true;
 }
+
 
 bool ChunkGatedDeltaRuleBwdDhuTiling::CheckInputShape(gert::TilingContext* context) {
   OP_CHECK_IF(IS_VARIABLE_LEN && B != 1, 
@@ -105,7 +131,54 @@ bool ChunkGatedDeltaRuleBwdDhuTiling::CheckInputShape(gert::TilingContext* conte
 }
 
 bool ChunkGatedDeltaRuleBwdDhuTiling::CalcUb(gert::TilingContext *context) {
+  // AIC_AIV_1_2, 每个VEC处理BT/2行
+  uint32_t halfBT = CeilDiv(static_cast<uint32_t>(chunkSize), NUM_2);
+  uint32_t halfK = CeilDiv(halfK, NUM_2);
+
+  uint32_t gBufByte = halfBT * HALF_DTYPE_SIZE;
+  uint32_t gCastBufByte = halfBT * FP32_DTYPE_SIZE;
+  uint32_t dvoBufByte = halfBT * V * HALF_DTYPE_SIZE;
+  uint32_t dvoCastBufByte = halfBT * V * FP32_DTYPE_SIZE;
+  uint32_t dqkBufByte = halfBT * K * HALF_DTYPE_SIZE;
+  uint32_t dqkCastBufByte = halfBT * K * FP32_DTYPE_SIZE;
+  uint32_t dhBufByte = halfK * V * HALF_DTYPE_SIZE;
+  uint32_t dhCastBufByte = halfK * V * FP32_DTYPE_SIZE;
+
+  uint32_t tBufByte = NUM_3 * halfK * V * FP32_DTYPE_SIZE;// 96/192k
+  auto platformInfoPtr = context->GetPlatformInfo();
+  auto ascendcPlatform = platform_ascendc::PlatformAscendC(platformInfoPtr);
+  uint64_t maxUbSize = 0;
+  ascendcPlatform.GetCoreMemSize(platform_ascendc::CoreMemType::UB, maxUbSize);
+
+  OP_CHECK_IF(tBufByte > maxUbSize, OPS_REPORT_VECTOR_INNER_ERR(context->GetNodeName(),
+              "K/V is too large, K should less than 128 and V should less than 256."), 
+              return false);
+  tilingData.set_gBufSize(halfBT);
+  tilingData.set_dvBufSize(halfBT * V);
+  tilingData.set_qBufSize(halfBT * K);
+  tilingData.set_dhBufSize(halfK * V);
+  tilingData.set_totalTbufByte(tBufByte);
   return true;
+}
+
+void ChunkGatedDeltaRuleBwdDhuTiling::SetWorkspaceSize(gert::TilingContext* context) {
+  auto platformInfoPtr = context->GetPlatformInfo();
+  auto ascendcPlatform = platform_ascendc::PlatformAscendC(platformInfoPtr);
+  uint32_t totalCoreNum = ascendcPlatform.GetCoreNumAic();
+  uint32_t taskNum = B * H; // 每个核处理一个batch的一个头的完整sequence
+  uint32_t usedCoreNum = taskNum > totalCoreNum ? totalCoreNum : taskNum;  
+  tilingData.set_usedCoreNum(usedCoreNum);
+  context->SetBlockDim(usedCoreNum);
+
+  uint64_t bdvWs = chunkSize * V * usedCoreNum * HALF_DTYPE_SIZE;
+  uint64_t qWs = K * V * usedCoreNum * HALF_DTYPE_SIZE;
+  uint64_t wV2Ws = K * V * usedCoreNum * HALF_DTYPE_SIZE;
+  uint64_t qDoWs = K * V * usedCoreNum * HALF_DTYPE_SIZE;
+  uint64_t usrWsSize = bdvWs + qWs + wV2Ws + qDoWs;
+
+  uint64_t sysWorkspaceSize = ascendcPlatform.GetLibApiWorkSpaceSize();
+  size_t* workspace = context->GetWorkspaceSizes(1);
+  workspace[0] = usrWsSize + sysWorkspaceSize;
 }
 
 ASCENDC_EXTERN_C ge::graphStatus Tiling4ChunkGDRBwdDhu(gert::TilingContext* context) {
@@ -114,25 +187,25 @@ ASCENDC_EXTERN_C ge::graphStatus Tiling4ChunkGDRBwdDhu(gert::TilingContext* cont
               OPS_REPORT_VECTOR_INNER_ERR(context->GetNodeName(), "tiling init failed"), 
               return ge::GRAPH_FAILED);
   
+  OP_CHECK_IF(!tiling.VarLenSetting(context), 
+            OPS_REPORT_VECTOR_INNER_ERR(context->GetNodeName(), "tiling init failed"), 
+            return ge::GRAPH_FAILED);
+  
   OP_CHECK_IF(!tiling.CheckInputShape(context), OPS_REPORT_VECTOR_INNER_ERR(context->GetNodeName(),
               "CheckInputShape Failed"), return ge::GRAPH_FAILED);
 
-  
-  chunkGatedDeltaRuleBwdDhuTiling.set_totalCoreNum(40);
+  OP_CHECK_IF(!tiling.CalcUb(context), OPS_REPORT_VECTOR_INNER_ERR(context->GetNodeName(),
+            "Set Ub Failed"), return ge::GRAPH_FAILED);
   context->SetTilingKey(1);
-  context->SetBlockDim(40);
   auto platformInfoPtr = context->GetPlatformInfo();
   OP_CHECK_IF(platformInfoPtr == nullptr,
               OPS_REPORT_VECTOR_INNER_ERR(context->GetNodeName(), "platformInfoPtr is null!"),
               return ge::GRAPH_FAILED);
-  auto ascendcPlatform = platform_ascendc::PlatformAscendC(platformInfoPtr);
-  uint64_t sysWorkspaceSize = ascendcPlatform.GetLibApiWorkSpaceSize();
-  size_t* workspace = context->GetWorkspaceSizes(1);
-  uint64_t usrWorkspaceSize = 0;
-  workspace[0] = usrWorkspaceSize + sysWorkspaceSize;
-  chunkGatedDeltaRuleBwdDhuTiling.SaveToBuffer(
+  tiling.SetWorkspaceSize(context);
+  printf(">>>>>>>>>>>save\n");
+  tiling.tilingData.SaveToBuffer(
     context->GetRawTilingData()->GetData(), context->GetRawTilingData()->GetCapacity());
-  context->GetRawTilingData()->SetDataSize(chunkGatedDeltaRuleBwdDhuTiling.GetDataSize());
+  context->GetRawTilingData()->SetDataSize(tiling.tilingData.GetDataSize());
   return ge::GRAPH_SUCCESS;
 }
 

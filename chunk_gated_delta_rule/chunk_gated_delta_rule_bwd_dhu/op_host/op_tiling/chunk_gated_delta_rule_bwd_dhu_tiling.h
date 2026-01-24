@@ -26,7 +26,23 @@
 namespace optiling {
 
 BEGIN_TILING_DATA_DEF(ChunkGatedDeltaRuleBwdDhuTilingData)
-TILING_DATA_FIELD_DEF(int64_t, totalCoreNum);             // 物理总核数
+TILING_DATA_FIELD_DEF(uint64_t, B);
+TILING_DATA_FIELD_DEF(uint64_t, H);
+TILING_DATA_FIELD_DEF(uint64_t, T);
+TILING_DATA_FIELD_DEF(uint64_t, K);
+TILING_DATA_FIELD_DEF(uint64_t, V);
+TILING_DATA_FIELD_DEF(uint64_t, chunkSize);
+TILING_DATA_FIELD_DEF(uint64_t, chunkNum);
+TILING_DATA_FIELD_DEF(uint64_t, seqNum);
+TILING_DATA_FIELD_DEF(uint64_t, gBufSize);
+TILING_DATA_FIELD_DEF(uint64_t, dvBufSize);
+TILING_DATA_FIELD_DEF(uint64_t, qBufSize);
+TILING_DATA_FIELD_DEF(uint64_t, dhBufSize);
+TILING_DATA_FIELD_DEF(uint64_t, totalTbufByte);
+TILING_DATA_FIELD_DEF(uint64_t, isVarLen);
+TILING_DATA_FIELD_DEF(uint64_t, isScale);
+TILING_DATA_FIELD_DEF(uint32_t, usedCoreNum);
+TILING_DATA_FIELD_DEF(float, scale);
 END_TILING_DATA_DEF;
 
 REGISTER_TILING_DATA_CLASS(ChunkGatedDeltaRuleBwdDhu, ChunkGatedDeltaRuleBwdDhuTilingData)
@@ -39,17 +55,18 @@ public:
     bool Init(gert::TilingContext *context);
     bool CheckInputShape(gert::TilingContext *context);
     bool CalcUb(gert::TilingContext *context);
+    void SetWorkspaceSize(gert::TilingContext *context);
+    bool VarLenSetting(gert::TilingContext *context);
 private:
 
     bool IS_SCALE = false;
     bool IS_VARIABLE_LEN = false; 
-    uint32_t B = 0;
-    uint32_t H = 0;
-    uint32_t T = 0;
-    uint32_t K = 0;
-    uint32_t V = 0;
-    uint32_t chunkNum = 0;
-    uint32_t chunkSize = 64;
+    uint64_t B = 0;
+    uint64_t H = 0;
+    uint64_t T = 0;
+    uint64_t K = 0;
+    uint64_t V = 0;
+    uint64_t chunkSize = 64;
 };
 
 } // namespace optiling
