@@ -155,9 +155,8 @@ int main() {
   int64_t chunk_size = 64;
   int64_t chunk_num = 2;
 
-  std::vector<int64_t> cuSeqlensHostData = {0, 64, 128};
+  std::vector<int64_t> cuSeqlensHostData = {0, 96, 224, 320};
   std::vector<int64_t> chunkIndicesHostData = get_chunk_indices(cuSeqlensHostData,chunk_size);
-  std::vector<uint8_t> triMaskHostData = createUpperTriMask(chunk_size);
 
   int64_t NT = static_cast<int64_t>(chunkIndicesHostData.size()) / 2;
   float scale = 1.0;
@@ -168,9 +167,10 @@ int main() {
   std::vector<int64_t> doShape = {B, H, T, V};
   std::vector<int64_t> dvShape = {B, H, T, V};
   std::vector<int64_t> gShape = {B, H, T};
-  std::vector<int64_t> cuSeqlensShape = {static_cast<int64_t>(cuSeqlensHostData.size())};
-  std::vector<int64_t> chunkIndicesShape = {NT, 2};
-  std::vector<int64_t> triMaskShape = {chunk_size, chunk_size};
+  // std::vector<int64_t> cuSeqlensShape = {static_cast<int64_t>(cuSeqlensHostData.size())};
+  // std::vector<int64_t> chunkIndicesShape = {NT, 2};
+  uint64_t cuSeqlensSize = cuSeqlensHostData.size();
+  uint64_t chunkIndicesSize = NT*2;
 
   std::vector<int64_t> dv2Shape = {B, H, T, V};
   std::vector<int64_t> dhShape = {B, H, chunk_num, K, V};
@@ -184,7 +184,6 @@ int main() {
   void* gDeviceAddr = nullptr;
   void* cuSeqlensDeviceAddr = nullptr;
   void* chunkIndicesDeviceAddr = nullptr;
-  void* triMaskDeviceAddr = nullptr;
 
   void* dv2DeviceAddr = nullptr;
   void* dhDeviceAddr = nullptr;
@@ -196,9 +195,8 @@ int main() {
   aclTensor* d_o = nullptr;
   aclTensor* dv = nullptr;
   aclTensor* g = nullptr;
-  aclTensor* cuSeqlens = nullptr;
-  aclTensor* chunkIndices = nullptr;
-  aclTensor* triMask = nullptr;
+  aclIntArray* cuSeqlens = nullptr;
+  aclIntArray* chunkIndices = nullptr;
 
   aclTensor* dh = nullptr;
   aclTensor* dh0 = nullptr;
@@ -234,12 +232,10 @@ int main() {
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   ret = CreateAclTensor(gHostData, gShape, &gDeviceAddr, aclDataType::ACL_FLOAT16, &g);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
-  ret = CreateAclTensor(cuSeqlensHostData, cuSeqlensShape, &cuSeqlensDeviceAddr, aclDataType::ACL_INT64, &cuSeqlens);
-  CHECK_RET(ret == ACL_SUCCESS, return ret);
-  ret = CreateAclTensor(chunkIndicesHostData, chunkIndicesShape, &chunkIndicesDeviceAddr, aclDataType::ACL_INT64, &chunkIndices);
-  CHECK_RET(ret == ACL_SUCCESS, return ret);
-  ret = CreateAclTensor(triMaskHostData, triMaskShape, &triMaskDeviceAddr, aclDataType::ACL_BOOL, &triMask);
-  CHECK_RET(ret == ACL_SUCCESS, return ret);
+  cuSeqlens = aclCreateIntArray(cuSeqlensHostData.data(), cuSeqlensSize);
+  CHECK_RET(cuSeqlens != nullptr, return ACL_ERROR_BAD_ALLOC);
+  chunkIndices = aclCreateIntArray(chunkIndicesHostData.data(), chunkIndicesSize);
+  CHECK_RET(chunkIndices != nullptr, return ACL_ERROR_BAD_ALLOC);
   ret = CreateAclTensor(dv2HostData, dv2Shape, &dv2DeviceAddr, aclDataType::ACL_FLOAT16, &dv2);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   ret = CreateAclTensor(dhHostData, dhShape, &dhDeviceAddr, aclDataType::ACL_FLOAT16, &dh);
@@ -253,7 +249,7 @@ int main() {
   // 调用aclnnChunkGatedDeltaRuleBwdDhu第一段接口
   std::cout << "aclnnChunkGatedDeltaRuleBwdDhuGetWorkspaceSize >>>>>" << std::endl;
   
-  ret = aclnnChunkGatedDeltaRuleBwdDhuGetWorkspaceSize(q, k, w, d_o, dv, g, nullptr, nullptr, nullptr, cuSeqlens, chunkIndices, triMask, scale, chunk_size, dh, dh0, dv2, &workspaceSize, &executor);
+  ret = aclnnChunkGatedDeltaRuleBwdDhuGetWorkspaceSize(q, k, w, d_o, dv, g, nullptr, nullptr, nullptr, cuSeqlens, chunkIndices, scale, chunk_size, dh, dh0, dv2, &workspaceSize, &executor);
   CHECK_RET(
       ret == ACL_SUCCESS,
       LOG_PRINT("aclnnChunkGatedDeltaRuleBwdDhuGetWorkspaceSize failed. ERROR: %d\n", ret);
@@ -291,9 +287,8 @@ int main() {
   aclDestroyTensor(d_o);
   aclDestroyTensor(dv);
   aclDestroyTensor(g);
-  aclDestroyTensor(cuSeqlens);
-  aclDestroyTensor(chunkIndices);
-  aclDestroyTensor(triMask);
+  aclDestroyIntArray(cuSeqlens);
+  aclDestroyIntArray(chunkIndices);
   aclDestroyTensor(dv2);
   aclDestroyTensor(dh);
   aclDestroyTensor(dh0);
@@ -305,9 +300,8 @@ int main() {
   aclrtFree(doDeviceAddr);
   aclrtFree(dvDeviceAddr);
   aclrtFree(gDeviceAddr);
-  aclrtFree(cuSeqlensDeviceAddr);
-  aclrtFree(chunkIndicesDeviceAddr);
-  aclrtFree(triMaskDeviceAddr);
+  // aclrtFree(cuSeqlensDeviceAddr);
+  // aclrtFree(chunkIndicesDeviceAddr);
   aclrtFree(dv2DeviceAddr);
   aclrtFree(dhDeviceAddr);
   aclrtFree(dh0DeviceAddr);

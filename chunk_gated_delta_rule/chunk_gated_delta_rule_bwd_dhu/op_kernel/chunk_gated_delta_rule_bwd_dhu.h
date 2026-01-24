@@ -9,34 +9,43 @@
  */
 
 /*!
- * \file grouped_matmul.h
+ * \file chunk_gated_delta_rule_bwd_dhu.h
  * \brief
  */
 #ifndef CHUNK_GATED_DELTA_RULE_BWD_DHU_H
 #define CHUNK_GATED_DELTA_RULE_BWD_DHU_H
-#include "kernel_operator.h"
+#endif
 
+#include "kernel_operator.h"
+#include "chunk_gated_delta_rule_bwd_dhu_base.h"
+
+using namespace AscendC;
 namespace ChunkGDRBwdDhu {
 
-class ChunkGatedDeltaRuleBwdDhu {
-
+template <typename DT>
+class GDRVec : public GDRVecBase<DT>
+{
 public:
-    __aicore__ inline ChunkGatedDeltaRuleBwdDhu(){};
+    __aicore__ inline GDRVec(){};
     __aicore__ inline void Process();
     __aicore__ inline void Init(GM_ADDR q, GM_ADDR k, GM_ADDR w, GM_ADDR d_o, GM_ADDR dv, GM_ADDR g, GM_ADDR cu_seqlens, 
-                                GM_ADDR chunk_indices, GM_ADDR tri_mask, const ChunkGatedDeltaRuleBwdDhuTilingData *__restrict tilingData);
-};
+                                GM_ADDR chunk_indices, const ChunkGatedDeltaRuleBwdDhuTilingData& tilingData);
 
-__aicore__ inline void ChunkGatedDeltaRuleBwdDhu::Init(GM_ADDR q, GM_ADDR k, GM_ADDR w, GM_ADDR d_o, GM_ADDR dv, GM_ADDR g, GM_ADDR cu_seqlens, 
-                                                       GM_ADDR chunk_indices, GM_ADDR tri_mask, const ChunkGatedDeltaRuleBwdDhuTilingData *__restrict tilingData)
+}; // class GDRVec
+
+template <typename DT>
+__aicore__ inline void GDRVec<DT>::Init(GM_ADDR q, GM_ADDR k, GM_ADDR w, GM_ADDR d_o, GM_ADDR dv, GM_ADDR g, GM_ADDR cu_seqlens, 
+                                GM_ADDR chunk_indices, const ChunkGatedDeltaRuleBwdDhuTilingData& tilingData)
 {
-    
+    GDRVecBase<DT>::InitTilingData(tilingData);
+    printf("Init>>>>\n");
 }
 
-__aicore__ inline void ChunkGatedDeltaRuleBwdDhu::Process( )
+template <typename DT>
+__aicore__ inline void GDRVec<DT>::Process( )
 {
+    printf("process>>>>\n");
    
 }
 
-}  // namespace ChunkGDRBwdDhu
-#endif  // CHUNK_GATED_DELTA_RULE_BWD_DHU_H
+} // namespace ChunkGDRBwdDhu
