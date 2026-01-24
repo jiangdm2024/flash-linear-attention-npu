@@ -12,9 +12,10 @@
  * \file prepare_wy_repr_bwd_full.cpp
  * \brief
  */
-
 #include "kernel_operator.h"
-#include "prepare_wy_repr_bwd_full.h"
+#include "prepare_wy_repr_bwd_full_common.h"
+#include "prepare_wy_repr_bwd_full_cube.h"
+#include "prepare_wy_repr_bwd_full_vector.h"
 #include "lib/matmul_intf.h"
 // #include "kernel_basic_intf.h"
 using namespace AscendC;
@@ -25,48 +26,16 @@ __global__ __aicore__ void prepare_wy_repr_bwd_full(GM_ADDR k, GM_ADDR v, GM_ADD
     AscendC::AscendCUtils::SetOverflow(1);
     // KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
     if (TILING_KEY_IS(1)) {
-        KERNEL_TASK_TYPE(1, KERNEL_TYPE_MIX_AIC_1_1);
+        KERNEL_TASK_TYPE(1, KERNEL_TYPE_MIX_AIC_1_2);
         if ASCEND_IS_AIC{
-            PrepareWyReprBwdFullProcess<DTYPE_K> prepareWyReprBwdFullProcess(k, v, beta, A, dA, dw, du, g, dk, dv, dbeta, dg, workspace);
+            PrepareWyReprBwdFullProcess<DTYPE_K,DTYPE_BETA> prepareWyReprBwdFullProcess(k, v, beta, A, dA, dw, du, g, dk, dv, dbeta, dg, workspace);
             prepareWyReprBwdFullProcess.Init(tiling);
             prepareWyReprBwdFullProcess.Process();
         }
         if ASCEND_IS_AIV{
-            uint32_t coreIdx = AscendC::GetBlockIdx();
-            TQue<AscendC::TPosition::VECIN, 1> quein;
-            TQue<AscendC::TPosition::VECOUT, 1> queout;
-            GlobalTensor<half> dkTensor;
-            tPipe.InitBuffer(quein, 2, 128 * sizeof(half));
-            tPipe.InitBuffer(queout, 2,128 * sizeof(half));
-            dkTensor.SetGlobalBuffer((__gm__ half*)dk);
-
-
-            printf("AIV hello world coreIdx:%u, AscendC::GetBlockNum():%u\n", coreIdx, AscendC::GetBlockNum());
-            for (uint32_t loopIdx = coreIdx; loopIdx < 32; loopIdx += AscendC::GetBlockNum()) {
-                // uint32_t bIdx = loopIdx / coreLoopsInB;
-                // GemmCoord blockCoord = matmulBlockSchedulerDkb.GetBlockCoord(loopIdx);
-                // GemmCoord actualBlockShape = matmulBlockSchedulerDkb.GetActualBlockShape(blockCoord);
-                for (int h = 0; h < 4; h++) {
-                    printf("offset %d\n", h * 2048 * 128 + 64 * loopIdx);
-                    AscendC::CrossCoreWaitFlag(0x8);
-                    AscendC::LocalTensor<half> in = quein.AllocTensor<half>();
-                    // DataCopyParam param{1, }
-                    DataCopy(in, dkTensor[h * 2048 * 128 + 64 * loopIdx], 128);
-                    quein.EnQue(in);
-                    auto calc = quein.DeQue<half>();
-                    // AscendC::DumpTensor(calc, 0, 128);
-                    auto out = queout.AllocTensor<half>();
-                    AscendC::Adds(out, calc, (half)10.0, 128);
-                    // AscendC::DumpTensor(out, 1, 128);
-                    quein.FreeTensor(calc);
-                    queout.EnQue(out);
-                    auto outtensor = queout.DeQue<half>();
-                    DataCopy(dkTensor[h * 2048 * 128 + 64 * loopIdx], outtensor, 128);
-                    // AscendC::DumpTensor(dkTensor[h * 2048 * 128 + 64 * loopIdx], 2, 128);
-                    queout.FreeTensor(outtensor);
-                }
-            }
-
+            PrepareWyReprBwdFullVectorProcess<DTYPE_K,DTYPE_BETA> prepareWyReprBwdFullVectorProcess(k, v, beta, A, dA, dw, du, g, dk, dv, dbeta, dg, workspace);
+            prepareWyReprBwdFullVectorProcess.Init(tiling, &tPipe);
+            prepareWyReprBwdFullVectorProcess.Process();
         }
     }
     return;

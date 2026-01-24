@@ -51,7 +51,7 @@ void PrintOutResult(std::vector<int64_t> &shape, void **deviceAddr) {
       ret == ACL_SUCCESS,
       LOG_PRINT("copy result from device to host failed. ERROR: %d\n", ret);
       return );
-  for (int64_t i = 0; i < 10; i++) {
+  for (int64_t i = 0; i < size; i++) {
     LOG_PRINT("result[%ld] is: %d\n", i, resultData[i]);
   }
 }
@@ -193,7 +193,7 @@ int main() {
   int64_t lenA = B * H * T * BT;
   std::vector<uint16_t> kHostData(lenK, 0x3C00); // 1.0 的 half 表示
   std::vector<uint16_t> vHostData(lenV, 0x3C00);
-  std::vector<uint16_t> betaHostData(lenBeta, 0x3C00);
+  std::vector<uint16_t> betaHostData(lenBeta, 16384);
   std::vector<uint16_t> AHostData(lenA, 0x3C00);
   std::vector<uint16_t> dAHostData(lenA, 0x3C00);
   std::vector<uint16_t> dwHostData(lenK, 0x3C00);

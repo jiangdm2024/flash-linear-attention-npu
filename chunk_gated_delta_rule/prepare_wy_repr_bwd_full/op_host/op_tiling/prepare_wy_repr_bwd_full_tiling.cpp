@@ -19,16 +19,23 @@
 #include "tiling_base/tiling_type.h"
 namespace optiling {
 ASCENDC_EXTERN_C ge::graphStatus TilingWyReprBwdFull(gert::TilingContext* context) {
+    int64_t B = 1;
+    int64_t T = 2048;
+    int64_t H = 4;
+    int64_t V = 128;
+    int64_t K = 128;
+    int64_t BT = 64;
     context->SetTilingKey(1);
     auto ascendcPlatform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
     auto sysWorkspaceSize = ascendcPlatform.GetLibApiWorkSpaceSize();
+    size_t userWorkspaceSize = B * T * H * V;
     // auto baseM = tiling.mmTilingData.get_baseM();
     // auto baseN = tiling.mmTilingData.get_baseN();
     // uint32_t userWorkspaceSize = baseM * baseN * FP32_DATATYPE_SIZE * aicNum * AIC_AIV_RATION;
     size_t* workspaces = context->GetWorkspaceSizes(1);
-    workspaces[0] = static_cast<size_t>(sysWorkspaceSize);
+    workspaces[0] = static_cast<size_t>(sysWorkspaceSize + userWorkspaceSize);
     const int64_t aicNum = ascendcPlatform.GetCoreNumAic();
-    context->SetBlockDim(aicNum);
+    context->SetBlockDim(1);
     return ge::GRAPH_SUCCESS;
 }
 
