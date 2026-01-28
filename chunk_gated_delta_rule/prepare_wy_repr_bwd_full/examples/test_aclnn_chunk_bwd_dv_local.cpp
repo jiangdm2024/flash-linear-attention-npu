@@ -142,7 +142,7 @@ std::vector<int64_t> get_chunk_indices(
 int main() {
   // 1. （固定写法）device/stream初始化，参考AscendCL对外接口列表
   // 根据自己的实际device填写deviceId
-  int32_t deviceId = 2;
+  int32_t deviceId = 1;
   aclrtStream stream;
   auto ret = Init(deviceId, &stream);
   CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("Init acl failed. ERROR: %d\n", ret);
@@ -282,6 +282,7 @@ int main() {
   // 5.获取输出的值，将device侧内存上的结果拷贝至host侧，需要根据具体API的接口定义修改
   // PrintOutResult(dkShape, &dkDeviceAddr);
   // PrintOutResultFp32(dbetaShape, &dbetaDeviceAddr);
+  PrintOutResultFp32(dgShape, &dgDeviceAddr);
   // 6. 释放aclTensor和aclScalar，需要根据具体API的接口定义修改
   // aclDestroyTensor(q);
   // aclDestroyTensor(k);
