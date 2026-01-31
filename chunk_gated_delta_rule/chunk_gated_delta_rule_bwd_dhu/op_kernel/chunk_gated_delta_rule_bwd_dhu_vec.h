@@ -151,18 +151,20 @@ __aicore__ inline void GDRVec<DT>::Process( )
         float gLast = 0.0;
         uint64_t bdvGmOffset = 0;
 
-        uint64_t gatedQOffset = this->coreIdx * BT * this->K;
+        uint64_t gatedQOffset = cubeIdx * BT * this->K;
+        if (this->subBlockIdx == 1) {
+            gatedQOffset += this->halfBT * this->K;
+        }
         for (int32_t chunkIdx = curChunkNum - 1; chunkIdx >= 0; chunkIdx --) {
             if (this->subBlockIdx == 0) {
                 bdvGmOffset = cubeIdx * BT * this->V;
                 tOffset = seqStartOffset + chunkIdx * BT;
                 CopyIn(this->gLastCastLocal, this->gLastLocal, this->gGm[tOffset + this->halfBT], this->halfBT);
-                PipeBarrier<PIPE_ALL>();
+                // PipeBarrier<PIPE_ALL>();
                 gLast = this->gLastCastLocal.GetValue(static_cast<uint64_t>(this->halfBT - 1));
             } else {
                 bdvGmOffset = cubeIdx * BT * this->V + this->halfBT * this->V;
                 tOffset = seqStartOffset + chunkIdx * BT + this->halfBT;
-                gatedQOffset += this->halfBT * this->K;
             }
             CopyIn(this->gCastLocal, this->gLocal, this->gGm[tOffset], this->halfBT);
             if (this->subBlockIdx == 1) {
@@ -178,7 +180,7 @@ __aicore__ inline void GDRVec<DT>::Process( )
             BlockMul(this->qCastLocal, this->gBCLocal, this->qCastLocal, 
                      this->halfBT, static_cast<uint32_t>(this->K));
             CopyOut(this->qLocal, this->qCastLocal, this->gatedQGm[gatedQOffset], this->qBufSize);
-
+            printf("gatedQOffset %lu\n", gatedQOffset + this->bdvWs);
             CrossCoreSetFlag<0x2, PIPE_MTE3>(0x3); // 计算完一个chunk的gatedQ,通知cube可以开始计算gatedQ @ do
 
             // 計算dv2 dv2 = bdv * exp(bg_last - bg) + dv[B,H,T,V]
@@ -203,11 +205,11 @@ __aicore__ inline void GDRVec<DT>::Process( )
                 Brcb(this->gBrcbLocal, this->gCastLocal, repeatTimes, {1,8});
                 // halfBT * 32
                 CrossCoreWaitFlag(0x1); // cube计算完一个chunk的bdv,vec开始计算对应的dv2
-                printf("cubeIdx %u\n", cubeIdx);
-                printf("bdvGmOffset %lu\n", bdvGmOffset);
+                // printf("cubeIdx %u\n", cubeIdx);
+                // printf("bdvGmOffset %lu\n", bdvGmOffset);
                 CopyIn(this->bdvCastLocal, this->vInLocal, this->bdvGm[bdvGmOffset], this->dvBufSize);
 
-                DumpTensor(this->bdvCastLocal, 195, 256);
+                // DumpTensor(this->bdvCastLocal, 195, 256);
 
                 BlockMul(this->bdvCastLocal, this->gBrcbLocal, this->bdvCastLocal, this->halfBT, this->V);
                 
