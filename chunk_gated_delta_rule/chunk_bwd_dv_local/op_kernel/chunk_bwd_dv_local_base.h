@@ -201,8 +201,6 @@ __aicore__ inline void ChunkBwdDvLocalBase<QKVT, GT>::vectorProcess(int64_t chun
 {
     for (int hIndex = 0; hIndex < h; hIndex++) {
         AscendC::LocalTensor<GT> gLocalTensor = gTQueIn.template AllocTensor<GT>();
-        // todo 改成chunkLen
-        // AscendC::DataCopy(gLocalTensor, gGm[curBatchId * h * t + hIndex * t + curTokenId], chunkSize);
         copyParams.blockLen = chunkLen * sizeof(GT);
         AscendC::DataCopyPad(gLocalTensor, gGm[curBatchId * h * t + hIndex * t + curTokenId], copyParams, gPadParams);
         // AscendC::printf("[tensor 打印]  gLocalTensor \n");
@@ -246,12 +244,12 @@ __aicore__ inline void ChunkBwdDvLocalBase<QKVT, GT>::vectorProcess(int64_t chun
             // 搬出到workspace
             int64_t outAddr =
                 curBatchId * h * t * chunkSize + hIndex * t * chunkSize + curTokenId * chunkSize + row * chunkSize;
-            AscendC::printf("[参数打印] outAddr = %d  \n", outAddr);
+            // AscendC::printf("[参数打印] outAddr = %d  \n", outAddr);
             AscendC::DataCopy(workspace2Gm[outAddr], kqOutLocalTensor, chunkSize);
-            AscendC::printf("[tensor 打印]  workspace2Gm \n");
-            AscendC::DumpTensor(workspace2Gm[curBatchId * h * t * chunkSize + hIndex * t * chunkSize +
-                                             curTokenId * chunkSize + row * chunkSize],
-                                5, chunkSize);
+            // AscendC::printf("[tensor 打印]  workspace2Gm \n");
+            // AscendC::DumpTensor(workspace2Gm[curBatchId * h * t * chunkSize + hIndex * t * chunkSize +
+            //                                  curTokenId * chunkSize + row * chunkSize],
+            //                     5, chunkSize);
         }
         gTQueIn.FreeTensor(gLocalTensor);
         kqTQueIn.FreeTensor(kqLocalTensor);
@@ -290,8 +288,8 @@ __aicore__ inline void ChunkBwdDvLocalBase<QKVT, GT>::cubeProcess(int64_t chunkL
                                             static_cast<uint32_t>(k)};
         for (int hIndex = 0; hIndex < h; hIndex++) {
             // Represent the full tensors
-            AscendC::printf("[参数打印] curBatchId * h * t * k + hIndex * t * k + curTokenId * k = %d  \n",
-                            curBatchId * h * t * k + hIndex * t * k + curTokenId * k);
+            // AscendC::printf("[参数打印] curBatchId * h * t * k + hIndex * t * k + curTokenId * k = %d  \n",
+            //                 curBatchId * h * t * k + hIndex * t * k + curTokenId * k);
             auto tensorA = tla::MakeTensor(kGm[curBatchId * h * t * k + hIndex * t * k + curTokenId * k], layoutA,
                                            Catlass::Arch::PositionGM{});
             auto tensorB = tla::MakeTensor(qGm[curBatchId * h * t * k + hIndex * t * k + curTokenId * k], layoutB,
@@ -306,13 +304,13 @@ __aicore__ inline void ChunkBwdDvLocalBase<QKVT, GT>::cubeProcess(int64_t chunkL
                 GetTile(tensorB, tla::MakeCoord(0, 0), tla::MakeShape(actualBlockShape.k(), actualBlockShape.n()));
             auto tensorBlockC =
                 GetTile(tensorC, tla::MakeCoord(0, 0), tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
-            AscendC::printf("[tensor 打印]  tensorBlockA \n");
-            AscendC::DumpTensor(tensorBlockA.data(), 5, 128);
-            AscendC::printf("[tensor 打印]  tensorBlockB \n");
-            AscendC::DumpTensor(tensorBlockB.data(), 5, 128);
+            // AscendC::printf("[tensor 打印]  tensorBlockA \n");
+            // AscendC::DumpTensor(tensorBlockA.data(), 5, 128);
+            // AscendC::printf("[tensor 打印]  tensorBlockB \n");
+            // AscendC::DumpTensor(tensorBlockB.data(), 5, 128);
             blockMmad(tensorBlockA, tensorBlockB, tensorBlockC, actualBlockShape);
-            AscendC::printf("[tensor 打印]  tensorBlockC \n");
-            AscendC::DumpTensor(tensorBlockC.data(), 5, 128);
+            // AscendC::printf("[tensor 打印]  tensorBlockC \n");
+            // AscendC::DumpTensor(tensorBlockC.data(), 5, 128);
             AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(0x1);
         }
 
@@ -385,7 +383,7 @@ __aicore__ inline void ChunkBwdDvLocalBase<QKVT, GT>::ProcessForBatch(int64_t cu
         startSeqId = chunkIndicesGm.GetValue(curStartChunkIdForBatch * 2);
         endSeqId = chunkIndicesGm.GetValue(curEndChunkIdForBatch * 2);
     }
-    AscendC::printf("[参数打印] startSeqId = %d  \n", startSeqId);
+    // AscendC::printf("[参数打印] startSeqId = %d  \n", startSeqId);
     int64_t seqChunkStartId = curStartChunkIdForBatch;
     for (int64_t curSeqId = startSeqId; curSeqId <= endSeqId; curSeqId++) {
         int64_t curSeqT = t;
@@ -395,12 +393,12 @@ __aicore__ inline void ChunkBwdDvLocalBase<QKVT, GT>::ProcessForBatch(int64_t cu
             int64_t eos = cuSeqlensGm.GetValue(curSeqId + 1);
             curSeqT = eos - bos;
         }
-        AscendC::printf("[参数打印] bos = %d  \n", bos);
+        // AscendC::printf("[参数打印] bos = %d  \n", bos);
         int64_t curSeqChunkNum = CeilDiv(curSeqT, chunkSize);
         int64_t seqChunkEndId = seqChunkStartId + curSeqChunkNum - 1;
         seqChunkEndId = seqChunkEndId > curEndChunkIdForBatch ? curEndChunkIdForBatch : seqChunkEndId;
-        AscendC::printf("[参数打印] curStartChunkIdForBatch = %d  \n", curStartChunkIdForBatch);
-        AscendC::printf("[参数打印] curEndChunkIdForBatch = %d  \n", curEndChunkIdForBatch);
+        // AscendC::printf("[参数打印] curStartChunkIdForBatch = %d  \n", curStartChunkIdForBatch);
+        // AscendC::printf("[参数打印] curEndChunkIdForBatch = %d  \n", curEndChunkIdForBatch);
         for (int64_t curChunkId = seqChunkStartId; curChunkId <= seqChunkEndId; curChunkId++) {
             int64_t curSeqChunkId = curChunkId;
             if (isVariable) {
@@ -414,9 +412,9 @@ __aicore__ inline void ChunkBwdDvLocalBase<QKVT, GT>::ProcessForBatch(int64_t cu
             if (isVariable) {
                 curTokenId = bos + chunkStartToken;
             }
-            AscendC::printf("[参数打印] chunkLen = %d  \n", chunkLen);
-            AscendC::printf("[参数打印] curTokenId = %d  \n", curTokenId);
-            AscendC::printf("[参数打印] curBatchId = %d  \n", curBatchId);
+            // AscendC::printf("[参数打印] chunkLen = %d  \n", chunkLen);
+            // AscendC::printf("[参数打印] curTokenId = %d  \n", curTokenId);
+            // AscendC::printf("[参数打印] curBatchId = %d  \n", curBatchId);
             if (chunkLen <= 0) {
                 continue;
             }
