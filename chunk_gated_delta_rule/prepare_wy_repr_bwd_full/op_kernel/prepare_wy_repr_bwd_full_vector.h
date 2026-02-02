@@ -99,6 +99,7 @@ private:
     TBuf<AscendC::TPosition::VECCALC> daFp32Buf;
     TBuf<AscendC::TPosition::VECCALC> kktFp32Buf;
     TBuf<AscendC::TPosition::VECCALC> daaFp32Buf;
+    TBuf<AscendC::TPosition::VECIN> betaBuf;
     TBuf<AscendC::TPosition::VECCALC> betaFp32Buf;
     TBuf<AscendC::TPosition::VECCALC> betaFp32BrcbBuf;
     TBuf<AscendC::TPosition::VECCALC> gFp32Buf;
@@ -189,12 +190,11 @@ __aicore__ void inline PrepareWyReprBwdFullVectorProcess<kType, betaType>::Proce
     //init
     pipe->InitBuffer(daInQue, 2, rowNum * chunkSize * sizeof(kType));
     pipe->InitBuffer(kktInQue, 2, rowNum * chunkSize * sizeof(kType));
-    pipe->InitBuffer(betaInQue, 2, rowNum * sizeof(betaType));
 
     pipe->InitBuffer(kktFp32Buf, rowNum * chunkSize * sizeof(float32_t));
     pipe->InitBuffer(daFp32Buf, rowNum * chunkSize * sizeof(float32_t));
-    pipe->InitBuffer(betaFp32Buf, rowNum * sizeof(float32_t));
-    pipe->InitBuffer(betaFp32BrcbBuf, rowNum * ONE_BLOCK_32);
+    pipe->InitBuffer(betaBuf, chunkSize * sizeof(betaType));
+    pipe->InitBuffer(betaFp32Buf, chunkSize * sizeof(float32_t));
     //daaFp32Buf，dg保存全量当前chunk数据，用于reducesum及累加
     pipe->InitBuffer(daaFp32Buf, chunkSize * chunkSize * sizeof(float32_t));
     pipe->InitBuffer(dgBuf, chunkSize * sizeof(betaType));
@@ -202,8 +202,8 @@ __aicore__ void inline PrepareWyReprBwdFullVectorProcess<kType, betaType>::Proce
 
     auto tensorKKTFp32 = kktFp32Buf.Get<float32_t>();
     auto tensorDaFp32 = daFp32Buf.Get<float32_t>();
+    auto tensorBeta = betaBuf.Get<betaType>();
     auto tensorBetaFP32 = betaFp32Buf.Get<float32_t>();
-    auto tensorBetaBrcbFP32 = betaFp32BrcbBuf.Get<float32_t>();
     auto tensorDaaFP32 = daaFp32Buf.Get<float32_t>();
     auto tensorDg = dgBuf.Get<betaType>();
     
@@ -227,6 +227,14 @@ __aicore__ void inline PrepareWyReprBwdFullVectorProcess<kType, betaType>::Proce
                 AscendC::CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_3);
                 continue;
             }
+            if constexpr (std::is_same<betaType, float32_t>()) {
+                DataCopy(tensorBetaFP32, betaTensor[(bIdx * H + h) * T  + chunkIdx * chunkSize], chunkSize);
+            } else {
+                DataCopy(tensorBeta, betaTensor[(bIdx * H + h) * T  + chunkIdx * chunkSize], chunkSize);
+                SetFlag<AscendC::HardEvent::MTE2_V>(0);
+                WaitFlag<AscendC::HardEvent::MTE2_V>(0);
+                Cast(tensorBetaFP32, tensorBeta, RoundMode::CAST_NONE, chunkSize);
+            }
             //分批次处理计算daa
             for(uint32_t rowOffset = 0;rowOffset < chunkSize; rowOffset += rowNum) {
                 auto dAOffset = ((bIdx * H + h) * T  + chunkIdx * chunkSize + rowOffset) * chunkSize;
@@ -235,41 +243,24 @@ __aicore__ void inline PrepareWyReprBwdFullVectorProcess<kType, betaType>::Proce
                 {
                     auto tensordaIn = daInQue.AllocTensor<kType>();
                     auto tensorKKTin = kktInQue.AllocTensor<kType>();
-                    auto tensorBetain = betaInQue.AllocTensor<betaType>();
 
                     DataCopy(tensordaIn, dATensor[dAOffset], chunkSize * rowNum);
                     DataCopy(tensorKKTin, workSpaceTensor[dAOffset], chunkSize * rowNum);
-                    DataCopy(tensorBetain, betaTensor[betaOffset], rowNum);
 
                     daInQue.EnQue(tensordaIn);
                     kktInQue.EnQue(tensorKKTin);
-                    betaInQue.EnQue(tensorBetain);
                 }
                 //compute
                 {
                     auto tensordaIn = daInQue.DeQue<kType>();
                     auto tensorKKTin = kktInQue.DeQue<kType>();
-                    auto tensorBetain = betaInQue.DeQue<betaType>();
                     //cast FP32
-                    if constexpr (!std::is_same<betaType, float32_t>()) {
-                        Cast(tensorBetaFP32, tensorBetain, RoundMode::CAST_NONE, rowNum);
-                    } else {
-                        DataCopy(tensorBetaFP32, tensorBetain, rowNum);
-                    }
                     Cast(tensorKKTFp32, tensorKKTin, RoundMode::CAST_NONE, chunkSize * rowNum);
                     Cast(tensorDaFp32, tensordaIn, RoundMode::CAST_NONE, chunkSize * rowNum);
-
-                    PipeBarrier<PIPE_V>();
-                    //brcb(beta)
-                    Brcb(tensorBetaBrcbFP32, tensorBetaFP32, static_cast<uint8_t>(rowNum / 8), {1, 8});
                     PipeBarrier<PIPE_V>();
                     // KKT * beta -> KKT
-                    uint64_t perchannelResOffset = 0;
-                    uint8_t repeatStride = chunkSize * sizeof(float32_t) / ONE_BLOCK_32;
-                    while (perchannelResOffset < chunkSize) {
-                        Mul(tensorKKTFp32[perchannelResOffset], tensorKKTFp32[perchannelResOffset], tensorBetaBrcbFP32,
-                            FP32_PER_REPEAT_64, rowNum, {1, 1, 0, repeatStride, repeatStride, 1});
-                        perchannelResOffset += FP32_PER_REPEAT_64;
+                    for(int i = 0; i < rowNum; i++) {
+                        Mul(tensorKKTFp32[i * chunkSize], tensorKKTFp32[i * chunkSize], tensorBetaFP32, chunkSize);
                     }
                     PipeBarrier<PIPE_V>();
                     // da * KKT(KKT * beta) -> da_A
@@ -278,7 +269,6 @@ __aicore__ void inline PrepareWyReprBwdFullVectorProcess<kType, betaType>::Proce
 
                     daInQue.FreeTensor(tensordaIn);
                     kktInQue.FreeTensor(tensorKKTin);
-                    betaInQue.FreeTensor(tensorBetain);
                 }
             }
             //最后处理daa的sum相减
@@ -297,7 +287,7 @@ __aicore__ void inline PrepareWyReprBwdFullVectorProcess<kType, betaType>::Proce
                 }
                 PipeBarrier<PIPE_V>();
                 WaitFlag<AscendC::HardEvent::MTE2_V>(0);
-                Sub(tensorDgFP32Add,tensorSum1DaaFP32, tensorSum0DaaFP32, chunkSize);
+                Sub(tensorDgFP32Add, tensorSum0DaaFP32, tensorSum1DaaFP32, chunkSize);
                 if constexpr (!std::is_same<betaType, float32_t>()) {
                     Cast(tensorDgFP32, tensorDg, RoundMode::CAST_NONE, chunkSize);
                 } else {
