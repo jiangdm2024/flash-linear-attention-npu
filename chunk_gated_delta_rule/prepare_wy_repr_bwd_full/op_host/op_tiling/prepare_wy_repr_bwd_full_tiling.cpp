@@ -223,7 +223,7 @@ static void PrepareWyReprBwdFullTilingDataPrint(gert::TilingContext *context, Pr
     auto nodeName = context->GetNodeName();
     OP_LOGD(nodeName, ">>>>>>>>>>>>>>> Start to print PrepareWyReprBwdFull tiling data <<<<<<<<<<<<<<<<");
     OP_LOGD(nodeName, "=== B: %ld", tiling.get_B());
-    OP_LOGD(nodeName, "=== G: %ld", tiling.get_H());
+    OP_LOGD(nodeName, "=== H: %ld", tiling.get_H());
     OP_LOGD(nodeName, "=== T: %ld", tiling.get_T());
     OP_LOGD(nodeName, "=== K: %ld", tiling.get_K());
     OP_LOGD(nodeName, "=== V: %ld", tiling.get_V());
@@ -264,12 +264,11 @@ ge::graphStatus Tiling4PrepareWyReprBwdFull(gert::TilingContext *context)
     const auto ascendcPlatform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
     context->SetBlockDim(ascendcPlatform.GetCoreNumAic());
 
-
     uint32_t sysWorkspaceSize = ascendcPlatform.GetLibApiWorkSpaceSize();
     uint32_t userWorkspaceSize = 2 * tiling.get_B() * tiling.get_H() * tiling.get_T() * tiling.get_V();
     size_t *currentWorkspace = context->GetWorkspaceSizes(1);
-    currentWorkspace[0] = sysWorkspaceSize;
-
+    currentWorkspace[0] = userWorkspaceSize + sysWorkspaceSize;
+    context->SetScheduleMode(1);  // set as batchmod for template using SyncAll
     OP_LOGD(context->GetNodeName(), "Tiling4PrepareWyReprBwdFull end.");
     return ge::GRAPH_SUCCESS;
 }

@@ -193,16 +193,20 @@ public:
                 uint32_t chunkIdx = loopIdx % coreLoopsInB;
                 GemmCoord blockCoord{0,0,0};
                 GemmCoord actualBlockShape{static_cast<uint32_t>(params.chunkSize),static_cast<uint32_t>(params.K),static_cast<uint32_t>(params.chunkSize)};
-                // AscendC::printf("blockCoord.m(%d)  blockCoord.n(%d)\n",blockCoord.m(), blockCoord.n());
+                // AscendC::printf("actualBlockShape.m(%d)  actualBlockShape.n(%d) actualBlockShape.k(%d)\n",actualBlockShape.m(), actualBlockShape.n(), actualBlockShape.k());
+                // AscendC::printf("params.ptrDA(%p),params.ptrKbeta(%p),params.ptrDk(%p)\n",params.ptrDA, params.ptrKbeta, params.ptrDk);
                 for (int h = 0; h < params.H; h++) {
                     // Represent the full gm
+                    // AscendC::printf("bIdx:%d, h:%d, chunkIdx:%d\n", bIdx, h, chunkIdx);
+                    // AscendC::printf("((bIdx * params.H + h) * params.T + chunkIdx * params.chunkSize) * params.chunkSize:%d\n", ((bIdx * params.H + h) * params.T + chunkIdx * params.chunkSize) * params.chunkSize);
+                    // AscendC::printf("((bIdx * params.H + h) * params.T + chunkIdx * params.chunkSize) * params.K:%d\n", ((bIdx * params.H + h) * params.T + chunkIdx * params.chunkSize) * params.K);
                     AscendC::GlobalTensor<ElementDA> gmDA;
                     gmDA.SetGlobalBuffer((__gm__ ElementDA *)params.ptrDA +((bIdx * params.H + h) * params.T + chunkIdx * params.chunkSize) * params.chunkSize);
                     AscendC::GlobalTensor<ElementKbeta> gmKbeta;
                     gmKbeta.SetGlobalBuffer((__gm__ ElementKbeta *)params.ptrKbeta + ((bIdx * params.H + h) * params.T + chunkIdx * params.chunkSize) * params.K);
                     AscendC::GlobalTensor<ElementDk> gmDk;
                     gmDk.SetGlobalBuffer((__gm__ ElementDk *)params.ptrDk + ((bIdx * params.H + h) * params.T + chunkIdx * params.chunkSize) * params.K);
-
+                    
                     // Represent the full tensors
                     auto tensorDA = tla::MakeTensor(gmDA, params.layoutDA, Arch::PositionGM{});
                     auto tensorKbeta = tla::MakeTensor(gmKbeta, params.layoutKbeta, Arch::PositionGM{});
@@ -213,15 +217,13 @@ public:
                     auto tensorBlockDA = GetTile(tensorDA,
                                                 tla::MakeCoord(0, 0),
                                                 tla::MakeShape(actualBlockShape.m(), actualBlockShape.k()));
+                    auto tensorBlockKbeta = GetTile(tensorKbeta,
+                                                tla::MakeCoord(0, 0),
+                                                tla::MakeShape(actualBlockShape.k(), actualBlockShape.n()));
                     auto tensorBlockDk = GetTile(tensorDk,
                                                 tla::MakeCoord(0, 0),
                                                 tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
                     // Compute block-scoped matrix multiply-add
-
-                    auto tensorBlockKbeta = GetTile(tensorKbeta,
-                                                tla::MakeCoord(0, 0),
-                                                tla::MakeShape(actualBlockShape.k(), actualBlockShape.n()));
-
                     //AscendC::printf("CrossCoreWaitFlag\n");
                     blockMmadBdk(tensorBlockDA, tensorBlockKbeta, tensorBlockDk, actualBlockShape);
                     AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
@@ -229,6 +231,7 @@ public:
                 }
             }
         }
+        AscendC::SyncAll<false>();
         {//处理第二部分 DAT@K -> DKB
             uint32_t coreLoopsInB = CeilDiv(params.T, params.chunkSize);
             uint32_t coreLoops = params.B * coreLoopsInB;
@@ -271,6 +274,7 @@ public:
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
         }
+        AscendC::SyncAll<false>();
         {//处理第三部分 AT@dw -> DKBG
             uint32_t coreLoopsInB = CeilDiv(params.T, params.chunkSize);
             uint32_t coreLoops = params.B * coreLoopsInB;
@@ -313,6 +317,7 @@ public:
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
         }
+        AscendC::SyncAll<false>();
         {//处理第四部分 AT@du -> dvb
             uint32_t coreLoopsInB = CeilDiv(params.T, params.chunkSize);
             uint32_t coreLoops = params.B * coreLoopsInB;
@@ -355,6 +360,7 @@ public:
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
         }
+        AscendC::SyncAll<false>();
         {//处理第五部分 K@KT -> kkT
             uint32_t coreLoopsInB = CeilDiv(params.T, params.chunkSize);
             uint32_t coreLoops = params.B * coreLoopsInB;
@@ -391,6 +397,9 @@ public:
                                                 tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
                     // Compute block-scoped matrix multiply-add
                     blockMmadkkT(tensorBlockK, tensorBlockKT, tensorBlockKKT, actualBlockShape);
+                    AscendC::GlobalTensor<ElementKKT> testA;
+                    AscendC::GlobalTensor<ElementKKT> testB;
+                    AscendC::GlobalTensor<ElementKKT> testC;
                     AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
                 }
             }
@@ -486,7 +495,7 @@ __aicore__ void inline PrepareWyReprBwdFullProcess<kType, betaType>::Process() {
     LayoutTagDAT tagDAT = LayoutTagDAT::MakeLayout<kType>(chunkSize, chunkSize);
     LayoutTagK tagK = LayoutTagK::MakeLayout<kType>(chunkSize, K);
     LayoutTagV tagV = LayoutTagV::MakeLayout<kType>(chunkSize, V);
-    LayoutTagKT tagKT = LayoutTagKT::MakeLayout<kType>(chunkSize, K);
+    LayoutTagKT tagKT = LayoutTagKT::MakeLayout<kType>(K, chunkSize);
     LayoutTagDu tagDu = LayoutTagDu::MakeLayout<kType>(chunkSize, V);
 
     //中间结果

@@ -25,6 +25,7 @@ __global__ __aicore__ void prepare_wy_repr_bwd_full(GM_ADDR k, GM_ADDR v, GM_ADD
     AscendC::TPipe tPipe;
     AscendC::AscendCUtils::SetOverflow(1);
     GET_TILING_DATA(tilingData, tiling);
+    // AscendC::printf("dA(%p), workspace(%p),dk(%p)\n",dA, workspace, dk);
     if (TILING_KEY_IS(1)) {
         KERNEL_TASK_TYPE(1, KERNEL_TYPE_MIX_AIC_1_2);
         if ASCEND_IS_AIC{
