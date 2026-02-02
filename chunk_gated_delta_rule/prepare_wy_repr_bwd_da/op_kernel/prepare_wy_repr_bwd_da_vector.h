@@ -67,7 +67,7 @@ private:
     TQue<AscendC::TPosition::VECIN, 1> dkInQue;
     TQue<AscendC::TPosition::VECIN, 1> dkbInQue;
 
-    TQue<AscendC::TPosition::VECOUT, 1> kBetaOutQue;
+    TQue<AscendC::TPosition::VECOUT, 1> kBetaGOutQue;
     TQue<AscendC::TPosition::VECOUT, 1> dkOutQue;
     TQue<AscendC::TPosition::VECOUT, 1> dBetaOutQue;
 
@@ -110,16 +110,16 @@ __aicore__ void inline PrepareWyReprBwddAVectorProcess<kType, betaType>::Process
     ProcessKBetaG();
     pipe->Reset();
     // TODO 计算b_v_beta
-    ProcessBVBeta();
-    pipe->Reset();
+    // ProcessBVBeta();
+    // pipe->Reset();
     // TODO 计算d_dA_tmp_1(b_dA_3) 和 d_dA_tmp_2(b_dA_4)
-    ProcessKBetaG();
-    pipe->Reset();
+    // Process1KBetaG();
+    // pipe->Reset();
     // TODO 计算d_dA_tmp_5(b_dA_7)
-    ProcessKBetaG();
-    pipe->Reset();
+    // Process2KBetaG();
+    // pipe->Reset();
     // 计算最终结果
-    ProcessKBetaG();
+    Process3KBetaG();
 
     //计算K * Beta[:None]
     ProcessKBeta();
@@ -130,7 +130,7 @@ __aicore__ void inline PrepareWyReprBwddAVectorProcess<kType, betaType>::Process
 
 template <typename kType, typename betaType>
 __aicore__ void inline PrepareWyReprBwddAVectorProcess<kType, betaType>::ProcessKBetaG() {
-    // todo 如果此处是浅融合， 此处应该为第二天CV，需要等待第一个MM的结果
+    // todo 如果此处是浅融合， 此处应该为第二个CV，需要等待第一个MM的结果
     uint32_t coreLoopsInB = CeilDiv(T, BT);
     uint32_t coreLoops = B * coreLoopsInB;
     uint32_t coreIdx = GetBlockIdx() / GetSubBlockNum();
@@ -146,26 +146,27 @@ __aicore__ void inline PrepareWyReprBwddAVectorProcess<kType, betaType>::Process
         }
     }
     //init
-    pipe->InitBuffer(kvInQue, 2, rowNum * K * sizeof(kType));
-    pipe->InitBuffer(betaInQue, 2, rowNum * sizeof(betaType));
-    pipe->InitBuffer(gInQue, 2, rowNum * sizeof(betaType));
-
-    pipe->InitBuffer(kFp32Buf, rowNum * K * sizeof(float32_t));
-
-    pipe->InitBuffer(kBetaOutQue, 2, rowNum * K * sizeof(kType));
-    pipe->InitBuffer(kFp32Buf, rowNum * K * sizeof(float32_t));
-    pipe->InitBuffer(betaFp32Buf, rowNum * sizeof(float32_t));
-    pipe->InitBuffer(betaFp32BrcbBuf, rowNum * ONE_BLOCK_32);
-
-
     kTensor.SetGlobalBuffer((__gm__ kType *)k);
     betaTensor.SetGlobalBuffer((__gm__ betaType *)beta);
-    auto tensorKfp32 = kFp32Buf.Get<float32_t>();
-    auto tensorBetafp32 = betaFp32Buf.Get<float32_t>();
-    auto tensorBetaBrcbfp32 = betaFp32BrcbBuf.Get<float32_t>();
+    gTensor.SetGlobalBuffer((__gm__ betaType *)g);
+
+    pipe->InitBuffer(kInQue, 2, rowNum * K * sizeof(kType));
+    pipe->InitBuffer(betaInQue, 2, rowNum * sizeof(betaType));
+    pipe->InitBuffer(gInQue, 2, rowNum * sizeof(betaType));
+    
+    pipe->InitBuffer(kFp32Buf, rowNum * K * sizeof(float32_t));
+    pipe->InitBuffer(betaFp32Buf, rowNum * K * sizeof(float32_t));
+    pipe->InitBuffer(BetaFp32BrcbBuf, rowNum * ONE_BLOCK_32);
+
+    //中间计算使用tmp
+    pipe->InitBuffer(kBetaGOutQue, 2, rowNum * K * sizeof(kType));
+    
+    // 向外搬出的结果是workspace
+    auto tensorKFp32 = kFp32Buf.Get<float32_t>();
+    auto tensorBetaFp32 = betaFp32Buf.Get<float32_t>();
+    auto tensorBetaBrcbFp32 = betaFp32BrcbBuf.Get<float32_t>();
     //
     // printf("coreIdx:%d, coreNumAic:%d\n",coreIdx, coreNumAic );
-
     for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
         uint32_t bIdx = loopIdx / coreLoopsInB;
         uint32_t chunkIdx = loopIdx % coreLoopsInB;
@@ -173,6 +174,135 @@ __aicore__ void inline PrepareWyReprBwddAVectorProcess<kType, betaType>::Process
             auto kOffset = ((bIdx * H + h) * T  + chunkIdx * BT + rowOffset) * K;
             auto betaOffset = (bIdx * H + h) * T  + chunkIdx * BT + rowOffset;
             auto gOffset = (bIdx * H + h) * T  + chunkIdx * BT + rowOffset;
+            // AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
+            //AscendC::printf("CrossCoreWaitFlag kOffset:%d, betaOffset:%d\n", kOffset, betaOffset);
+            //copyin
+            {
+                auto tensorKIn = kInQue.AllocTensor<kType>();
+                DataCopy(tensorKIn, kTensor[kOffset], K * rowNum);
+                auto tensorBetaIn = betaInQue.AllocTensor<betaType>();
+                DataCopy(tensorBetaIn, betaTensor[betaOffset], rowNum);
+                auto tensorGIn = gInQue.AllocTensor<betaType>();
+                DataCopy(tensorGIn, gTensor[gOffset], rowNum);
+
+                kInQue.EnQue(tensorKin);
+                betaInQue.EnQue(tensorBetain);
+                gInQue.EnQue(tensorGIn);
+                //AscendC::printf("copyin\n");
+            }
+            //compute
+            {
+                //AscendC::printf("150\n");
+                auto tensorKIn = kInQue.DeQue<kType>();
+                auto tensorBetaIn = betaInQue.DeQue<betaType>();
+                auto tensorGIn = gInQue.DeQue<betaType>();
+
+                auto tensorOut = kBetaGOutQue.AllocTensor<kType>();
+                //AscendC::printf("153\n");
+                //cast fp32
+                if constexpr (!std::is_same<betaType, float32_t>()) {
+                    Cast(tensorBetafp32, tensorBetaIn, RoundMode::CAST_NONE, rowNum);
+                } else {
+                    DataCopy(tensorBetafp32, tensorBetaIn, rowNum);
+                }
+                //AscendC::printf("159\n");
+                Cast(tensorKfp32, tensorKin, RoundMode::CAST_NONE, K * rowNum);
+                PipeBarrier<PIPE_V>();
+                //brcb
+                Brcb(tensorBetaBrcbfp32, tensorBetafp32, static_cast<uint8_t>(rowNum /8), {1, 8});
+                // DumpTensor(tensorBetaBrcbfp32, 0,  8 * rowNum);
+                PipeBarrier<PIPE_V>();
+                //AscendC::printf("165\n");
+                //mul
+                uint64_t perchannelResOffset = 0;
+                uint8_t repeatStride = K * sizeof(float32_t) / ONE_BLOCK_32;
+                while (perchannelResOffset < K) {
+                    Mul(tensorKfp32[perchannelResOffset], tensorKfp32[perchannelResOffset], tensorBetaBrcbfp32,
+                        FP32_PER_REPEAT_64, rowNum, {1, 1, 0, repeatStride, repeatStride, 1});
+                    perchannelResOffset += FP32_PER_REPEAT_64;
+                }
+                // DumpTensor(tensorKfp32, 1,  K * rowNum);
+                // b_g处理
+                if constexpr (!std::is_same<betaType, float32_t>()) {
+                    Cast(tensorBetafp32, tensorGIn, RoundMode::CAST_NONE, rowNum);
+                } else {
+                    DataCopy(tensorBetafp32, tensorGIn, rowNum);
+                }
+                PipeBarrier<PIPE_V>();
+                //brcb
+                Brcb(tensorBetaBrcbfp32, tensorBetafp32, static_cast<uint8_t>(rowNum /8), {1, 8});
+                PipeBarrier<PIPE_V>();
+                // mul
+                uint64_t perchannelResOffset = 0;
+                uint8_t repeatStride = K * sizeof(float32_t) / ONE_BLOCK_32;
+                while (perchannelResOffset < K) {
+                    Mul(tensorKfp32[perchannelResOffset], tensorKfp32[perchannelResOffset], tensorBetaBrcbfp32,
+                        FP32_PER_REPEAT_64, rowNum, {1, 1, 0, repeatStride, repeatStride, 1});
+                    perchannelResOffset += FP32_PER_REPEAT_64;
+                }
+
+                // 输出
+                PipeBarrier<PIPE_V>();
+                Cast(tensorOut, tensorKfp32, RoundMode::CAST_RINT, K * rowNum);
+                kInQue.FreeTensor(tensorKIn);
+                betaInQue.FreeTensor(tensorBetaIn);
+                gInQue.FreeTensor(tensorGIn);
+                kBetaGOutQue.EnQue(tensorOut);
+                //AscendC::printf("compute\n");
+            }
+            //copyout
+            {
+                auto tensorOut = kBetaGOutQue.DeQue<kType>();
+                DataCopy(workSpaceTensor[kOffset], tensorOut, K * rowNum);
+                kBetaGOutQue.FreeTensor(tensorOut);
+            }
+            // AscendC::CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_3);
+            //AscendC::printf("CrossCoreSetFlag\n");
+        }
+    }
+    // DumpTensor(workSpaceTensor, 0,  8192);
+    AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
+    AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
+    return;
+}
+
+template <typename kType, typename betaType>
+__aicore__ void inline PrepareWyReprBwdFullVectorProcess<kType, betaType>::ProcessVBeta() {
+    uint32_t coreLoopsInB = CeilDiv(T, chunkSize);
+    uint32_t coreLoops = B * coreLoopsInB;
+    uint32_t coreIdx = GetBlockIdx() / GetSubBlockNum();
+    uint32_t coreNumAic = GetBlockNum();
+    uint32_t rowNum = chunkSize;
+    uint32_t rowOffset = 0;
+    if(GetSubBlockNum() > 1) {
+        if(GetSubBlockIdx() == 0) {
+            rowNum = rowNum / GetSubBlockNum();
+        } else {
+            rowOffset = rowNum / GetSubBlockNum();
+            rowNum = rowNum - rowOffset;
+        }
+    }
+    //init
+    pipe->InitBuffer(kInQue, 2, rowNum * K * sizeof(kType));
+    pipe->InitBuffer(betaInQue, 2, rowNum * sizeof(betaType));
+    pipe->InitBuffer(kBetaOutQue, 2, rowNum * K * sizeof(kType));
+    pipe->InitBuffer(kFp32Buf, rowNum * K * sizeof(float32_t));
+    pipe->InitBuffer(betaFp32Buf, rowNum * sizeof(float32_t));
+    pipe->InitBuffer(betaFp32BrcbBuf, rowNum * ONE_BLOCK_32);
+    kTensor.SetGlobalBuffer((__gm__ kType *)k);
+    betaTensor.SetGlobalBuffer((__gm__ betaType *)beta);
+    auto tensorKFp32 = kFp32Buf.Get<float32_t>();
+    auto tensorBetaFP32 = betaFp32Buf.Get<float32_t>();
+    auto tensorBetaBrcbFP32 = betaFp32BrcbBuf.Get<float32_t>();
+    //
+    // printf("coreIdx:%d, coreNumAic:%d\n",coreIdx, coreNumAic );
+
+    for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
+        uint32_t bIdx = loopIdx / coreLoopsInB;
+        uint32_t chunkIdx = loopIdx % coreLoopsInB;
+        for (int h = 0; h < H; h++) {
+            auto kOffset = ((bIdx * H + h) * T  + chunkIdx * chunkSize + rowOffset) * K;
+            auto betaOffset = (bIdx * H + h) * T  + chunkIdx * chunkSize + rowOffset;
             AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
             //AscendC::printf("CrossCoreWaitFlag kOffset:%d, betaOffset:%d\n", kOffset, betaOffset);
             //copyin
@@ -193,31 +323,31 @@ __aicore__ void inline PrepareWyReprBwddAVectorProcess<kType, betaType>::Process
                 auto tensorBetain = betaInQue.DeQue<betaType>();
                 auto tensorOut = kBetaOutQue.AllocTensor<kType>();
                 //AscendC::printf("153\n");
-                //cast fp32
+                //cast FP32
                 if constexpr (!std::is_same<betaType, float32_t>()) {
-                    Cast(tensorBetafp32, tensorBetain, RoundMode::CAST_NONE, rowNum);
+                    Cast(tensorBetaFP32, tensorBetain, RoundMode::CAST_NONE, rowNum);
                 } else {
-                    DataCopy(tensorBetafp32, tensorBetain, rowNum);
+                    DataCopy(tensorBetaFP32, tensorBetain, rowNum);
                 }
                 //AscendC::printf("159\n");
-                Cast(tensorKfp32, tensorKin, RoundMode::CAST_NONE, K * rowNum);
+                Cast(tensorKFp32, tensorKin, RoundMode::CAST_NONE, K * rowNum);
                 PipeBarrier<PIPE_V>();
                 //brcb
-                Brcb(tensorBetaBrcbfp32, tensorBetafp32, static_cast<uint8_t>(rowNum /8), {1, 8});
-                // DumpTensor(tensorBetaBrcbfp32, 0,  8 * rowNum);
+                Brcb(tensorBetaBrcbFP32, tensorBetaFP32, static_cast<uint8_t>(rowNum /8), {1, 8});
+                // DumpTensor(tensorBetaBrcbFP32, 0,  8 * rowNum);
                 PipeBarrier<PIPE_V>();
                 //AscendC::printf("165\n");
                 //mul
                 uint64_t perchannelResOffset = 0;
                 uint8_t repeatStride = K * sizeof(float32_t) / ONE_BLOCK_32;
                 while (perchannelResOffset < K) {
-                    Mul(tensorKfp32[perchannelResOffset], tensorKfp32[perchannelResOffset], tensorBetaBrcbfp32,
+                    Mul(tensorKFp32[perchannelResOffset], tensorKFp32[perchannelResOffset], tensorBetaBrcbFP32,
                         FP32_PER_REPEAT_64, rowNum, {1, 1, 0, repeatStride, repeatStride, 1});
                     perchannelResOffset += FP32_PER_REPEAT_64;
                 }
-                // DumpTensor(tensorKfp32, 1,  K * rowNum);
+                // DumpTensor(tensorKFp32, 1,  K * rowNum);
                 PipeBarrier<PIPE_V>();
-                Cast(tensorOut, tensorKfp32, RoundMode::CAST_RINT, K * rowNum);
+                Cast(tensorOut, tensorKFp32, RoundMode::CAST_RINT, K * rowNum);
 
                 kInQue.FreeTensor(tensorKin);
                 betaInQue.FreeTensor(tensorBetain);
@@ -242,7 +372,6 @@ __aicore__ void inline PrepareWyReprBwddAVectorProcess<kType, betaType>::Process
     //AscendC::printf("CrossCoreWaitFlag\n");
     return;
 }
-
 
 template <typename kType, typename betaType>
 __aicore__ void inline PrepareWyReprBwddAVectorProcess<kType, betaType>::ProcessDkb() {
@@ -386,116 +515,6 @@ __aicore__ void inline PrepareWyReprBwddAVectorProcess<kType, betaType>::Process
     }
     return;
 }
-
-template <typename kType, typename betaType>
-__aicore__ void inline PrepareWyReprBwddAVectorProcess<kType, betaType>::ProcessKBeta() {
-    uint32_t coreLoopsInB = CeilDiv(T, BT);
-    uint32_t coreLoops = B * coreLoopsInB;
-    uint32_t coreIdx = GetBlockIdx() / GetSubBlockNum();
-    uint32_t coreNumAic = GetBlockNum();
-    uint32_t rowNum = BT;
-    uint32_t rowOffset = 0;
-    // TODO 这段代码没懂
-    if(GetSubBlockNum() > 1) {
-        if(GetSubBlockIdx() == 0) {
-            rowNum = rowNum / GetSubBlockNum();
-        } else {
-            rowOffset = rowNum / GetSubBlockNum();
-            rowNum = rowNum - rowOffset;
-        }
-    }
-    //init
-    pipe->InitBuffer(kInQue, 2, rowNum * K * sizeof(kType));
-    pipe->InitBuffer(betaInQue, 2, rowNum * sizeof(betaType));
-    pipe->InitBuffer(kBetaOutQue, 2, rowNum * K * sizeof(kType));
-    pipe->InitBuffer(kFp32Buf, rowNum * K * sizeof(float32_t));
-    pipe->InitBuffer(betaFp32Buf, rowNum * sizeof(float32_t));
-    pipe->InitBuffer(betaFp32BrcbBuf, rowNum * ONE_BLOCK_32);
-    kTensor.SetGlobalBuffer((__gm__ kType *)k);
-    betaTensor.SetGlobalBuffer((__gm__ betaType *)beta);
-    auto tensorKfp32 = kFp32Buf.Get<float32_t>();
-    auto tensorBetafp32 = betaFp32Buf.Get<float32_t>();
-    auto tensorBetaBrcbfp32 = betaFp32BrcbBuf.Get<float32_t>();
-    //
-    // printf("coreIdx:%d, coreNumAic:%d\n",coreIdx, coreNumAic );
-
-    for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
-        uint32_t bIdx = loopIdx / coreLoopsInB;
-        uint32_t chunkIdx = loopIdx % coreLoopsInB;
-        for (int h = 0; h < H; h++) {
-            auto kOffset = ((bIdx * H + h) * T  + chunkIdx * BT + rowOffset) * K;
-            auto betaOffset = (bIdx * H + h) * T  + chunkIdx * BT + rowOffset;
-            AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
-            //AscendC::printf("CrossCoreWaitFlag kOffset:%d, betaOffset:%d\n", kOffset, betaOffset);
-            //copyin
-            {
-                auto tensorKin = kInQue.AllocTensor<kType>();
-                DataCopy(tensorKin, kTensor[kOffset], K * rowNum);
-                auto tensorBetain = betaInQue.AllocTensor<betaType>();
-                DataCopy(tensorBetain, betaTensor[betaOffset], rowNum);
-
-                kInQue.EnQue(tensorKin);
-                betaInQue.EnQue(tensorBetain);
-                //AscendC::printf("copyin\n");
-            }
-            //compute
-            {
-                //AscendC::printf("150\n");
-                auto tensorKin = kInQue.DeQue<kType>();
-                auto tensorBetain = betaInQue.DeQue<betaType>();
-                auto tensorOut = kBetaOutQue.AllocTensor<kType>();
-                //AscendC::printf("153\n");
-                //cast fp32
-                if constexpr (!std::is_same<betaType, float32_t>()) {
-                    Cast(tensorBetafp32, tensorBetain, RoundMode::CAST_NONE, rowNum);
-                } else {
-                    DataCopy(tensorBetafp32, tensorBetain, rowNum);
-                }
-                //AscendC::printf("159\n");
-                Cast(tensorKfp32, tensorKin, RoundMode::CAST_NONE, K * rowNum);
-                PipeBarrier<PIPE_V>();
-                //brcb
-                Brcb(tensorBetaBrcbfp32, tensorBetafp32, static_cast<uint8_t>(rowNum /8), {1, 8});
-                // DumpTensor(tensorBetaBrcbfp32, 0,  8 * rowNum);
-                PipeBarrier<PIPE_V>();
-                //AscendC::printf("165\n");
-                //mul
-                uint64_t perchannelResOffset = 0;
-                uint8_t repeatStride = K * sizeof(float32_t) / ONE_BLOCK_32;
-                while (perchannelResOffset < K) {
-                    Mul(tensorKfp32[perchannelResOffset], tensorKfp32[perchannelResOffset], tensorBetaBrcbfp32,
-                        FP32_PER_REPEAT_64, rowNum, {1, 1, 0, repeatStride, repeatStride, 1});
-                    perchannelResOffset += FP32_PER_REPEAT_64;
-                }
-                // DumpTensor(tensorKfp32, 1,  K * rowNum);
-                PipeBarrier<PIPE_V>();
-                Cast(tensorOut, tensorKfp32, RoundMode::CAST_RINT, K * rowNum);
-
-                kInQue.FreeTensor(tensorKin);
-                betaInQue.FreeTensor(tensorBetain);
-                kBetaOutQue.EnQue(tensorOut);
-                //AscendC::printf("compute\n");
-            }
-            //copyout
-            {
-                auto tensorOut = kBetaOutQue.DeQue<kType>();
-                DataCopy(workSpaceTensor[kOffset], tensorOut, K * rowNum);
-                kBetaOutQue.FreeTensor(tensorOut);
-                // AscendC::printf("kOffset:%ld, K * rowNum:%d\n", kOffset, K * rowNum);
-            }
-            AscendC::CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_3);
-            //AscendC::printf("CrossCoreSetFlag\n");
-        }
-    }
-    // DumpTensor(workSpaceTensor, 0,  8192);
-    AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
-    AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
-    //AscendC::printf("CrossCoreWaitFlag\n");
-    //AscendC::printf("CrossCoreWaitFlag\n");
-    return;
-}
-
-
 
 #endif  // PREPARE_WY_REPR_BWD_DA_VECTOR_H
 
