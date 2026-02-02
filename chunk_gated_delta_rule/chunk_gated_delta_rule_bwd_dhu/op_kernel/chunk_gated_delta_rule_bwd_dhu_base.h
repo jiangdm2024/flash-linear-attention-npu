@@ -34,6 +34,13 @@ constexpr uint32_t EVENT_MTE2_V = 1;
 constexpr uint32_t EVENT_MTE3_V = 1;
 constexpr uint32_t EVENT_V_MTE3 = 1;
 constexpr uint32_t EVENT_MTE2_MTE3 = 1;
+constexpr uint8_t CROSS_CORE_V2C_GQ = 0;  // vec算完gated q, 通知cube算term1 = gQ @ do 
+constexpr uint8_t CROSS_CORE_C2V_BDV = 1; // cube算完bdv，通知vec算dv2 
+constexpr uint8_t CROSS_CORE_V2C_DV2 = 2; // vec算完dv2，通知cube算term2 =  w @ dv2
+constexpr uint8_t CROSS_CORE_C2V_TERM1 = 3;  // cube算完dh_term1,通知vec搬入dh_term1
+constexpr uint8_t CROSS_CORE_C2V_TERM2 = 4;  // cube算完dh_term2,通知vec搬入dh_term1
+constexpr uint8_t CROSS_CORE_V2C_BDH = 5;  // vec更新完dh,通知cube進行下個chunk的bdv計算
+
 
 template <typename DT>
 class GDRBase {
@@ -118,6 +125,7 @@ protected:
     uint32_t coreIdx = 0;
     uint32_t subBlockIdx = 0;
     uint32_t halfBT = 0;
+    uint32_t halfK = 0;
 
 
 };
@@ -149,6 +157,7 @@ __aicore__ inline void GDRBase<DT>::InitTilingData(const ChunkGatedDeltaRuleBwdD
     this->coreIdx = GetBlockIdx();
     this->subBlockIdx = GetSubBlockIdx();
     this->halfBT = this->chunkSize / 2 ;
+    this->halfK = this->K / 2;
 
 }
 
