@@ -147,12 +147,12 @@ int main() {
             return ret);
 
   // 2. 构造输入与输出，需要根据API的接口自定义构造
-  int64_t B = 1;
-  int64_t T = 1792;
-  int64_t H = 2;
-  int64_t V = 128;
+  int64_t B = 2;
+  int64_t T = 1024;
+  int64_t H = 32;
+  int64_t V = 256;
   int64_t K = 128;
-  int64_t chunk_size = 64;
+  int64_t chunk_size = 128;
   int64_t chunk_num = T/chunk_size;
 
   std::vector<int64_t> cuSeqlensHostData = {0, 256, 768, 1792}; // [0, 2, 4, ]
@@ -241,13 +241,14 @@ int main() {
   ret = CreateAclTensor(dh0HostData, dh0Shape, &dh0DeviceAddr, aclDataType::ACL_FLOAT16, &dh0);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   // 3. 调用CANN算子库API，需要修改为具体的Api名称
-  uint64_t workspaceSize = 1024*1024*1024;
+  uint64_t workspaceSize = 1024 * 1024 * 1024;
   aclOpExecutor *executor;
 
   // 调用aclnnChunkGatedDeltaRuleBwdDhu第一段接口
   std::cout << "aclnnChunkGatedDeltaRuleBwdDhuGetWorkspaceSize >>>>>" << std::endl;
   
-  ret = aclnnChunkGatedDeltaRuleBwdDhuGetWorkspaceSize(q, k, w, d_o, dv, g, nullptr, nullptr, nullptr, cuSeqlens, chunkIndices, scale, chunk_size, dh, dh0, dv2, &workspaceSize, &executor);
+  // ret = aclnnChunkGatedDeltaRuleBwdDhuGetWorkspaceSize(q, k, w, d_o, dv, g, nullptr, nullptr, nullptr, cuSeqlens, chunkIndices, scale, chunk_size, dh, dh0, dv2, &workspaceSize, &executor);
+  ret = aclnnChunkGatedDeltaRuleBwdDhuGetWorkspaceSize(q, k, w, d_o, dv, g, nullptr, nullptr, nullptr, nullptr, nullptr, scale, chunk_size, dh, dh0, dv2, &workspaceSize, &executor);
   CHECK_RET(
       ret == ACL_SUCCESS,
       LOG_PRINT("aclnnChunkGatedDeltaRuleBwdDhuGetWorkspaceSize failed. ERROR: %d\n", ret);
@@ -262,7 +263,7 @@ int main() {
               LOG_PRINT("allocate workspace failed. ERROR: %d\n", ret);
               return ret);
   }
-  // std::cout << "allocate workspace >>>>> end " << std::endl;
+  std::cout << "allocate workspace >>>>> end " << std::endl;
 
   // 调用aclnnChunkGatedDeltaRuleBwdDhu第二段接口
   ret = aclnnChunkGatedDeltaRuleBwdDhu(workspaceAddr, workspaceSize, executor, stream);

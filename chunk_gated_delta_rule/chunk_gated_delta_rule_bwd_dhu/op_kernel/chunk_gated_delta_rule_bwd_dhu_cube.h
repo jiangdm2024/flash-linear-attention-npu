@@ -676,7 +676,7 @@ __aicore__ inline void GDRCube<DT>::Process()
     using GDRKernel = Gemm::Kernel::ChunkGDRBwdDhuTla<ArchTag, DT,
                                                       L1TileShapeBdv, L0TileShapeBdv, TileCopyBdv,
                                                       L1TileShapeDh, L0TileShapeDh, TileCopyDh1, TileCopyDh2>;
-
+    this->pipe.Destroy();
     GDRKernel kernel;
     typename GDRKernel::Params param{k, layoutK, dh, layoutDh, workspace, layoutBdv, // k @ dh -> bdv[workspace ]
                                      layoutGq, dO, layoutDo,                // gatedQ^T[workspace ] @ do -> bdh[workspace]

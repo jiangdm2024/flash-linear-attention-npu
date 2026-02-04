@@ -47,6 +47,7 @@ namespace {
   constexpr uint32_t NUM_128 = 128;
   constexpr uint32_t NUM_2 = 2;
   constexpr uint32_t NUM_3 = 3;
+  constexpr uint32_t BLOCK_SIZE = 32;
 
   constexpr uint32_t HALF_DTYPE_SIZE = 2;
   constexpr uint32_t FP32_DTYPE_SIZE = 4;
@@ -77,7 +78,7 @@ bool ChunkGatedDeltaRuleBwdDhuTiling::Init(gert::TilingContext* context) {
   IS_SCALE = scalePtr == nullptr ? false : true;
   float scale = IS_SCALE ? *scalePtr : 1.0;
   const uint32_t *chunkSizePtr = attrs->GetAttrPointer<uint32_t>(ATTR_CHUNK_SIZE_IDX);
-  uint32_t chunkSize = chunkSizePtr == nullptr ? NUM_64 : *chunkSizePtr;
+  chunkSize = chunkSizePtr == nullptr ? NUM_64 : *chunkSizePtr;
   OP_CHECK_IF(!(chunkSize == NUM_64 || chunkSize == NUM_128), 
               OP_LOGE(context->GetNodeName(), "chunk_size should be 64 or 128, but got %d.", chunkSize), 
               return false);
@@ -132,22 +133,24 @@ bool ChunkGatedDeltaRuleBwdDhuTiling::CalcUb(gert::TilingContext *context) {
   // AIC_AIV_1_2, 每个VEC处理BT/2行
   uint32_t halfBT = CeilDiv(static_cast<uint32_t>(chunkSize), NUM_2);
   uint32_t halfK = CeilDiv(static_cast<uint32_t>(K), NUM_2);
-
   uint32_t gBufByte = halfBT * HALF_DTYPE_SIZE;
-  uint32_t gCastBufByte = halfBT * FP32_DTYPE_SIZE;
-  uint32_t dvoBufByte = halfBT * V * HALF_DTYPE_SIZE;
-  uint32_t dvoCastBufByte = halfBT * V * FP32_DTYPE_SIZE;
+  uint32_t gCastBufByte = halfBT * FP32_DTYPE_SIZE; // 256
+  uint32_t gBrcbBufByte = halfBT * BLOCK_SIZE; // 512
+  uint32_t dvBufByte = halfBT * V * HALF_DTYPE_SIZE; // 32K
+  uint32_t dvCastBufByte = halfBT * V * FP32_DTYPE_SIZE; // 64K
   uint32_t dqkBufByte = halfBT * K * HALF_DTYPE_SIZE;
   uint32_t dqkCastBufByte = halfBT * K * FP32_DTYPE_SIZE;
   uint32_t dhBufByte = halfK * V * HALF_DTYPE_SIZE;
   uint32_t dhCastBufByte = halfK * V * FP32_DTYPE_SIZE;
 
-  uint32_t tBufByte = NUM_3 * halfK * V * FP32_DTYPE_SIZE;// 96/192k
+  uint32_t tBufByte = std::max(NUM_2 * dhCastBufByte,
+      gCastBufByte + gBrcbBufByte + dvBufByte + NUM_2 * dvCastBufByte);
+  
+  printf("tBufByte is %lu\n", tBufByte);
   auto platformInfoPtr = context->GetPlatformInfo();
   auto ascendcPlatform = platform_ascendc::PlatformAscendC(platformInfoPtr);
   uint64_t maxUbSize = 0;
   ascendcPlatform.GetCoreMemSize(platform_ascendc::CoreMemType::UB, maxUbSize);
-
   OP_CHECK_IF(tBufByte > maxUbSize, OPS_REPORT_VECTOR_INNER_ERR(context->GetNodeName(),
               "K/V is too large, K should less than 128 and V should less than 256."), 
               return false);
@@ -168,13 +171,13 @@ void ChunkGatedDeltaRuleBwdDhuTiling::SetWorkspaceSize(gert::TilingContext* cont
   tilingData.set_usedCoreNum(usedCoreNum);
   context->SetBlockDim(usedCoreNum);
 
-  uint64_t bdvWs = chunkSize * V * usedCoreNum * HALF_DTYPE_SIZE;
-  uint64_t qWs = K * chunkSize * usedCoreNum * HALF_DTYPE_SIZE;
-  uint64_t wDv2Ws = K * V * usedCoreNum * HALF_DTYPE_SIZE;
-  uint64_t qDoWs = K * V * usedCoreNum * HALF_DTYPE_SIZE;
-  uint64_t usrWsSize = bdvWs + qWs + wDv2Ws + qDoWs;
+  uint64_t bdvWs = chunkSize * V * usedCoreNum;
+  uint64_t qWs = K * chunkSize * usedCoreNum;
+  uint64_t wDv2Ws = K * V * usedCoreNum;
+  uint64_t qDoWs = K * V * usedCoreNum;
+  size_t usrWsSize = static_cast<size_t>((bdvWs + qWs + wDv2Ws + qDoWs) * HALF_DTYPE_SIZE);
 
-  uint64_t sysWorkspaceSize = ascendcPlatform.GetLibApiWorkSpaceSize();
+  size_t sysWorkspaceSize = ascendcPlatform.GetLibApiWorkSpaceSize();
   size_t* workspace = context->GetWorkspaceSizes(1);
   workspace[0] = usrWsSize + sysWorkspaceSize;
   tilingData.set_bdvWs(bdvWs);

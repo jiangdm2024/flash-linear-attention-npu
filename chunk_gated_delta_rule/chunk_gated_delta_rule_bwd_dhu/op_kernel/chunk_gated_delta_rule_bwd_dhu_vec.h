@@ -105,20 +105,19 @@ __aicore__ inline void GDRVec<DT>::InitUB()
     this->dvCastLocal = this->vecTbuf.template GetWithOffset<float>(this->dvBufSize, dv2Offset); // 64k
     dv2Offset += this->dvBufSize * FLOAT_DTYPE_SIZE;
     this->bdvCastLocal = this->vecTbuf.template GetWithOffset<float>(this->dvBufSize, dv2Offset); // 64k
-
     // calc bdh = bdh + qdo*scale - wv2
-    // | bdhCastLocal 64 | qDoCastLocal 64 | wV2CastLocal 64 |
-    // | 32 | bdhLocal   | 32 | qDoLocal   | 32 | wV2Local   |
+    // | bdhCastLocal/wV2CastLocal 64 | qDoCastLocal 64 |
+    // | 32 | bdhLocal/wV2Local       | 32 | qDoLocal   |
     uint64_t offsetDh = 0;
     uint32_t halfDhBufByte = this->dhBufSize * HALF_DTYPE_SIZE;
     this->bdhCastLocal = this->vecTbuf.template Get<float>(this->dhBufSize); 
     this->bdhLocal = this->vecTbuf.template GetWithOffset<DT>(this->dhBufSize, halfDhBufByte);
+    // 复用
+    this->wv2CastLocal = this->vecTbuf.template GetWithOffset<float>(this->dhBufSize, offsetDh);
+    this->wv2Local = this->vecTbuf.template GetWithOffset<DT>(this->dhBufSize, offsetDh + halfDhBufByte);
     offsetDh += this->dhBufSize * FLOAT_DTYPE_SIZE;
     this->qdoCastLocal = this->vecTbuf.template GetWithOffset<float>(this->dhBufSize, offsetDh);
     this->qdoLocal = this->vecTbuf.template GetWithOffset<DT>(this->dhBufSize, offsetDh + halfDhBufByte);
-    offsetDh += this->dhBufSize * FLOAT_DTYPE_SIZE;
-    this->wv2CastLocal = this->vecTbuf.template GetWithOffset<float>(this->dhBufSize, offsetDh);
-    this->wv2Local = this->vecTbuf.template GetWithOffset<DT>(this->dhBufSize, offsetDh + halfDhBufByte);
     offsetDh += this->dhBufSize * FLOAT_DTYPE_SIZE;
 }
 
@@ -210,7 +209,7 @@ __aicore__ inline void GDRVec<DT>::CaclOffset(const uint32_t taskIdx, uint64_t& 
     }
     tailChunkLen = curSeqLen % BT; 
     
-    dhBlockSize = this->K * this->V;
+    dhBlockSize = this->K * this->V; // 16384
 
     bdvOffset = cubeIdx * BT * this->V;
     gatedQOffset = cubeIdx * BT * this->K;
@@ -312,7 +311,6 @@ __aicore__ inline void GDRVec<DT>::UpdateDh(const float gLastExp, uint64_t& curG
         if (this->isScale) {
             Muls(this->qdoCastLocal, this->qdoCastLocal, this->scale, this->dhBufSize);
         }
-        DumpTensor(this->dhGm[curGmOffsetH], 276, 128);
         if (chunkIdx != curChunkNum -1) {
             Add(this->qdoCastLocal, this->bdhCastLocal, this->qdoCastLocal, this->dhBufSize);
         }
