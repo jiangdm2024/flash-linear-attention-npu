@@ -165,8 +165,10 @@ public:
         Arch::Resource<ArchTag> resource;
         uint32_t coreIdx = AscendC::GetBlockIdx();
         {   // 计算第一个矩阵乘 dA_1 = dw @ kbg.T     V->C
-            AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
-            AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
+            AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
+            AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
+            AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
+            AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
             //AscendC::printf("CrossCoreSetFlag\n");
             //AscendC::printf("CrossCoreSetFlag\n");
             BlockMmadDA1 blockMmadDA1(resource);
@@ -206,11 +208,12 @@ public:
                     // Compute block-scoped matrix multiply-add
                     // AscendC::printf("CrossCoreWaitFlag\n");
                     blockMmadDA1(tensorBlockDw, tensorBlockKbg, tensorBlockDA1, actualBlockShape);
-                    AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
+                    AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
                     // AscendC::printf("CrossCoreSetFlag\n");
                 }
             }
         }
+        AscendC::SyncAll<false>();
         {   // 计算第二个矩阵乘 dA_2 = du @ vb.T
             uint32_t coreLoopsInB = CeilDiv(params.T, params.BT);
             uint32_t coreLoops = params.B * coreLoopsInB;
@@ -252,7 +255,10 @@ public:
             }
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
         }
+        AscendC::SyncAll<false>();
         {   // 计算第三个矩阵乘 dA_5 = dA_4 @ A.T
             uint32_t coreLoopsInB = CeilDiv(params.T, params.BT);
             uint32_t coreLoops = params.B * coreLoopsInB;
@@ -292,12 +298,14 @@ public:
                     
                     // Compute block-scoped matrix multiply-add
                     blockMmadDA5(tensorBlockDA4, tensorBlockAT, tensorBlockDA5, actualBlockShape);
-                    
                     // 注意：这里可能需要设置计算完成的标志
-                    // AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_?);
+                    AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
                 }
             }
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
         }
+        AscendC::SyncAll<false>();
         {   // 计算第四个矩阵乘 dA_6 = A.T @ dA_5
             uint32_t coreLoopsInB = CeilDiv(params.T, params.BT);
             uint32_t coreLoops = params.B * coreLoopsInB;
@@ -338,12 +346,13 @@ public:
                     blockMmadDA6(tensorBlockAT, tensorBlockDA5, tensorBlockDA6, actualBlockShape);
                     
                     // 注意：这里可能需要设置计算完成的标志
-                    // AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_?);
+                    AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
                 }
             }
-            // 可能需要等待其他核心完成
-            // AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_?);
-            // AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_?);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
         }
     }
 };
