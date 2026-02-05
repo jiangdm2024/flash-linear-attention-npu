@@ -15,7 +15,7 @@
 
 #include "kernel_operator.h"
 #include "prepare_wy_repr_bwd_da_common.h"
-// #include "prepare_wy_repr_bwd_da_cube.h"
+#include "prepare_wy_repr_bwd_da_cube.h"
 #include "prepare_wy_repr_bwd_da_vector.h"
 #include "lib/matmul_intf.h"
 // #include "kernel_basic_intf.h"
@@ -31,11 +31,11 @@ __global__ __aicore__ void prepare_wy_repr_bwd_da(GM_ADDR k, GM_ADDR v, GM_ADDR 
         KERNEL_TASK_TYPE(1, KERNEL_TYPE_MIX_AIC_1_2);
         if ASCEND_IS_AIC{
             uint32_t coreIdx = GetBlockIdx() / GetSubBlockNum();
-            // AscendC::printf("---hyh in cube GetBlockIdx: %d,coreIdx: %d, ---\n",  GetBlockIdx(), coreIdx);
-            // AscendC::printf("---hyh in cube GetSubBlockNum: %d, GetSubBlockIdx: %d, ---\n", GetSubBlockNum(), GetSubBlockIdx());
-            // PrepareWyReprBwdDAProcess<DTYPE_K, DTYPE_BETA> prepareWyReprBwdDAProcess(k, v, beta, A, dw, du, g, dA, workspace);
-            // prepareWyReprBwdDAProcess.Init(tilingData);
-            // prepareWyReprBwdDAProcess.Process();
+            AscendC::printf("###yzq in cube GetBlockIdx: %d,coreIdx: %d, ---\n",  GetBlockIdx(), coreIdx);
+            AscendC::printf("###yzq in cube GetSubBlockNum: %d, GetSubBlockIdx: %d, ---\n", GetSubBlockNum(), GetSubBlockIdx());
+            PrepareWyReprBwdDAProcess<DTYPE_K, DTYPE_BETA> prepareWyReprBwdDAProcess(k, v, beta, A, dw, du, g, dA, workspace);
+            prepareWyReprBwdDAProcess.Init(tilingData);
+            prepareWyReprBwdDAProcess.Process();
         }
         if ASCEND_IS_AIV{
             AscendC::TPipe tPipe;
