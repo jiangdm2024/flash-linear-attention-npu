@@ -19,4 +19,20 @@ constexpr uint64_t SYNC_AIV_AIC_FLAG_3 = 3;
 constexpr uint64_t SYNC_AIC_AIV_FLAG_5 = 5;
 constexpr uint64_t ONE_BLOCK_32 = 32;
 constexpr uint32_t FP32_PER_REPEAT_64 = 64;
+
+__aicore__ inline int64_t CeilDiv(int64_t dividend, int64_t divisor)
+{
+    if (unlikely(divisor == 0)) {
+        return 0;
+    }
+    return (dividend + divisor - 1) / divisor;
+}
+
+__aicore__ inline void MTE2ToVSync()
+{
+    event_t eventIDMTE2ToV = static_cast<event_t>(GetTPipePtr()->FetchEventID(AscendC::HardEvent::MTE2_V));
+    AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventIDMTE2ToV);
+    AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventIDMTE2ToV);
+}
+
 #endif  // PREPARE_WY_REPR_BWD_DA_COMMON_H

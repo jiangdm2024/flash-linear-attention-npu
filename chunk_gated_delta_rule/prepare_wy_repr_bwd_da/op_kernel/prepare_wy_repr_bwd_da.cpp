@@ -14,9 +14,9 @@
  */
 
 #include "kernel_operator.h"
-// #include "prepare_wy_repr_bwd_da_common.h"
+#include "prepare_wy_repr_bwd_da_common.h"
 // #include "prepare_wy_repr_bwd_da_cube.h"
-// #include "prepare_wy_repr_bwd_da_vector.h"
+#include "prepare_wy_repr_bwd_da_vector.h"
 #include "lib/matmul_intf.h"
 // #include "kernel_basic_intf.h"
 
@@ -26,23 +26,25 @@ __global__ __aicore__ void prepare_wy_repr_bwd_da(GM_ADDR k, GM_ADDR v, GM_ADDR 
 {
     AscendC::printf("---hyh in prepare_wy_repr_bwd_da---\n");
     AscendC::AscendCUtils::SetOverflow(1);
+    GET_TILING_DATA(tilingData, tiling);
     if (TILING_KEY_IS(1)) {
         KERNEL_TASK_TYPE(1, KERNEL_TYPE_MIX_AIC_1_2);
         if ASCEND_IS_AIC{
             uint32_t coreIdx = GetBlockIdx() / GetSubBlockNum();
-            AscendC::printf("---hyh in cube GetBlockIdx: %d,coreIdx: %d, ---\n",  GetBlockIdx(), coreIdx);
-            AscendC::printf("---hyh in cube GetSubBlockNum: %d, GetSubBlockIdx: %d, ---\n", GetSubBlockNum(), GetSubBlockIdx());
+            // AscendC::printf("---hyh in cube GetBlockIdx: %d,coreIdx: %d, ---\n",  GetBlockIdx(), coreIdx);
+            // AscendC::printf("---hyh in cube GetSubBlockNum: %d, GetSubBlockIdx: %d, ---\n", GetSubBlockNum(), GetSubBlockIdx());
             // PrepareWyReprBwdDAProcess<DTYPE_K, DTYPE_BETA> prepareWyReprBwdDAProcess(k, v, beta, A, dw, du, g, dA, workspace);
-            // prepareWyReprBwdDAProcess.Init(tiling);
+            // prepareWyReprBwdDAProcess.Init(tilingData);
             // prepareWyReprBwdDAProcess.Process();
         }
         if ASCEND_IS_AIV{
             AscendC::TPipe tPipe;
             uint32_t coreIdx = GetBlockIdx() / GetSubBlockNum();
-            AscendC::printf("---hyh in vector GetBlockIdx: %d,coreIdx: %d, ---\n",  GetBlockIdx(), coreIdx);
-            AscendC::printf("---hyh in vector GetSubBlockNum: %d, GetSubBlockIdx: %d, ---\n", GetSubBlockNum(), GetSubBlockIdx());
+            AscendC::printf("---hyh 02060205 ---\n");
+            // AscendC::printf("---hyh in vector GetBlockIdx: %d,coreIdx: %d, ---\n",  GetBlockIdx(), coreIdx);
+            // AscendC::printf("---hyh in vector GetSubBlockNum: %d, GetSubBlockIdx: %d, ---\n", GetSubBlockNum(), GetSubBlockIdx());
             PrepareWyReprBwdDAVectorProcess<DTYPE_K, DTYPE_BETA> prepareWyReprBwdDAVectorProcess(k, v, beta, A, dw, du, g, dA, workspace);
-            prepareWyReprBwdDAVectorProcess.Init(tiling, &tPipe);
+            prepareWyReprBwdDAVectorProcess.Init(tilingData, &tPipe);
             prepareWyReprBwdDAVectorProcess.Process();
         }
     }
