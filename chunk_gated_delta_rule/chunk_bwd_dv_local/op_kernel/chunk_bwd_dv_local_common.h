@@ -88,8 +88,8 @@ struct VariableLengthStrategy {
     int64_t chunkNumForT;
     AscendC::GlobalTensor<int64_t> cuSeqlensGm;
     AscendC::GlobalTensor<int64_t> chunkIndicesGm;
-    __aicore__ inline VariableLengthStrategy(int64_t chunkSize_, int64_t lenT_, int64_t chunkNumForT_, GM_ADDR cuSeqlens_,
-                                             GM_ADDR chunkIndices_)
+    __aicore__ inline VariableLengthStrategy(int64_t chunkSize_, int64_t lenT_, int64_t chunkNumForT_,
+                                             GM_ADDR cuSeqlens_, GM_ADDR chunkIndices_)
     {
         chunkSize = chunkSize_;
         lenT = lenT_;

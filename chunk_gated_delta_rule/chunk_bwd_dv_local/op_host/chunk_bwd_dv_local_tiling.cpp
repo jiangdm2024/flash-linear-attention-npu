@@ -39,6 +39,8 @@ static constexpr size_t DIM_1 = 1;
 static constexpr size_t DIM_2 = 2;
 static constexpr size_t DIM_3 = 3;
 
+static constexpr uint32_t QKV_DTYPE_SIZE = 2;
+
 static constexpr int64_t V_L_B = 1;
 static constexpr int64_t CHUNK_SIZE_64 = 64;
 static constexpr int64_t CHUNK_SIZE_128 = 128;
@@ -248,7 +250,8 @@ ge::graphStatus Tiling4ChunkBwdDvLocal(gert::TilingContext *context)
     context->SetBlockDim(std::min(tiling.get_chunkNumForT() * tiling.get_b(), coreNum));
 
     uint32_t sysWorkspaceSize = ascendcPlatform.GetLibApiWorkSpaceSize();
-    uint32_t userWorkspaceSize = tiling.get_b() * tiling.get_h() * tiling.get_t() * tiling.get_chunkSize();
+    uint32_t userWorkspaceSize =
+        QKV_DTYPE_SIZE * tiling.get_b() * tiling.get_h() * tiling.get_t() * tiling.get_chunkSize();
     size_t *currentWorkspace = context->GetWorkspaceSizes(1);
     currentWorkspace[0] = sysWorkspaceSize + userWorkspaceSize;
     context->SetScheduleMode(1);

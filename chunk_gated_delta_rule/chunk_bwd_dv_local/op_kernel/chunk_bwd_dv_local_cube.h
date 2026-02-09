@@ -112,6 +112,9 @@ __aicore__ inline void ChunkBwdDvLocalCube<QKVT, GT, Strategy>::Process()
         for (int64_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += blockNum) {
             int64_t curBatchId = static_cast<int64_t>(loopIdx) / strategy.chunkNumForT;
             IndexResult indexResult = strategy.calculate(loopIdx);
+            if (indexResult.chunkLen <= 0) {
+                continue;
+            }
             Catlass::GemmCoord actualBlockShape{static_cast<uint32_t>(indexResult.chunkLen),
                                                 static_cast<uint32_t>(indexResult.chunkLen), static_cast<uint32_t>(K)};
             for (int hIndex = 0; hIndex < H; hIndex++) {
@@ -121,9 +124,10 @@ __aicore__ inline void ChunkBwdDvLocalCube<QKVT, GT, Strategy>::Process()
                 auto tensorB =
                     tla::MakeTensor(qGm[curBatchId * H * T * K + hIndex * T * K + indexResult.curTokenId * K], layoutB,
                                     Catlass::Arch::PositionGM{});
-                auto tensorC = tla::MakeTensor(workspaceGm[curBatchId * H * T * strategy.chunkSize + hIndex * T * strategy.chunkSize +
-                                                           indexResult.curTokenId * strategy.chunkSize],
-                                               layoutC, Catlass::Arch::PositionGM{});
+                auto tensorC = tla::MakeTensor(
+                    workspaceGm[curBatchId * H * T * strategy.chunkSize + hIndex * T * strategy.chunkSize +
+                                indexResult.curTokenId * strategy.chunkSize],
+                    layoutC, Catlass::Arch::PositionGM{});
                 AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_1);
                 auto tensorBlockA =
                     GetTile(tensorA, tla::MakeCoord(0, 0), tla::MakeShape(actualBlockShape.m(), actualBlockShape.k()));
@@ -131,11 +135,11 @@ __aicore__ inline void ChunkBwdDvLocalCube<QKVT, GT, Strategy>::Process()
                     GetTile(tensorB, tla::MakeCoord(0, 0), tla::MakeShape(actualBlockShape.k(), actualBlockShape.n()));
                 auto tensorBlockC =
                     GetTile(tensorC, tla::MakeCoord(0, 0), tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
-
                 blockMmad(tensorBlockA, tensorBlockB, tensorBlockC, actualBlockShape);
                 AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_3);
             }
         }
+        AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_1);
         AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_1);
     }
     AscendC::SyncAll<false>();
@@ -157,12 +161,16 @@ __aicore__ inline void ChunkBwdDvLocalCube<QKVT, GT, Strategy>::Process()
         for (int64_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += blockNum) {
             int64_t curBatchId = static_cast<int64_t>(loopIdx) / strategy.chunkNumForT;
             IndexResult indexResult = strategy.calculate(loopIdx);
+            if (indexResult.chunkLen <= 0) {
+                continue;
+            }
             Catlass::GemmCoord actualBlockShape{static_cast<uint32_t>(indexResult.chunkLen), static_cast<uint32_t>(V),
                                                 static_cast<uint32_t>(indexResult.chunkLen)};
             for (int hIndex = 0; hIndex < H; hIndex++) {
-                auto tensorA = tla::MakeTensor(workspaceGm[curBatchId * H * T * strategy.chunkSize + hIndex * T * strategy.chunkSize +
-                                                           indexResult.curTokenId * strategy.chunkSize],
-                                               layoutA, Catlass::Arch::PositionGM{});
+                auto tensorA = tla::MakeTensor(
+                    workspaceGm[curBatchId * H * T * strategy.chunkSize + hIndex * T * strategy.chunkSize +
+                                indexResult.curTokenId * strategy.chunkSize],
+                    layoutA, Catlass::Arch::PositionGM{});
                 auto tensorB =
                     tla::MakeTensor(dOGm[curBatchId * H * T * V + hIndex * T * V + indexResult.curTokenId * V], layoutB,
                                     Catlass::Arch::PositionGM{});

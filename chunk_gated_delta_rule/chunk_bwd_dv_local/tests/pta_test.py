@@ -267,7 +267,7 @@ def compare_tensors_by_ratio(tensor1, tensor2, ratio_threshold=0.01, verbose=Tru
         return False
 
 def test_variable():
-    B, H, T, K, V = 1, 2, 65, 128, 128
+    B, H, T, K, V = 1, 2, 128, 128, 128
     chunk_size=64
     scale = 1.0
 
@@ -277,7 +277,7 @@ def test_variable():
     print(f"==== k.shape = {k.shape} ")
     d_o = create_tensor((B, H, T, V), dtype=torch.float16)
     print(f"==== d_o.shape = {d_o.shape} ")
-    g = create_tensor((B, H, T), dtype=torch.float16)
+    g = create_tensor((B, H, T), dtype=torch.float)
     print(f"==== g.shape = {g.shape} ")
     # print("q =",q)
     # print("k =",k)
@@ -286,7 +286,7 @@ def test_variable():
     upper_tri_matrix = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool))
     # print(f"==== upper_tri_matrix.shape = {upper_tri_matrix.shape} ")
     
-    cu_seqlens = q.new_tensor([0, 64,65], dtype=torch.long)
+    cu_seqlens = q.new_tensor([0, 64,128], dtype=torch.long)
     chunk_indices = prepare_chunk_indices(cu_seqlens, chunk_size)
     print(f"==== chunk_indices.shape = {chunk_indices.shape} ",chunk_indices)
 
@@ -306,7 +306,7 @@ def test_variable():
     compare_tensors_by_ratio(dv_golden,dv.cpu())
 
 def test_fix():
-    B, H, T, K, V = 2, 2, 64, 128, 128
+    B, H, T, K, V = 256, 32, 128, 128, 128
     chunk_size=64
     scale = 1.0
 
@@ -340,9 +340,10 @@ def test_fix():
 
 if __name__ == "__main__":
     torch.manual_seed(0)
-    
+    print("==== test_variable ====")
     test_variable()
-    test_fix()
+    # print("==== test_fix ====")
+    # test_fix()
 
     
 

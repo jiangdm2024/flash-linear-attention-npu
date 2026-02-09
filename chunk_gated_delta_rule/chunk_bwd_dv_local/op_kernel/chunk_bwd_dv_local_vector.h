@@ -105,9 +105,15 @@ __aicore__ inline void ChunkBwdDvLocalVector<QKVT, GT, Strategy>::Process()
 {
     int64_t vecTaskIdx = 0;
     AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIV_AIC_FLAG_1);
+    AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIV_AIC_FLAG_1);
     for (int64_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += blockNum) {
         int64_t curBatchId = static_cast<int64_t>(loopIdx) / strategy.chunkNumForT;
         IndexResult indexResult = strategy.calculate(loopIdx);
+        if (indexResult.chunkLen <= 0) {
+            continue;
+        }
+        int64_t baseOffset = 0;
+        int64_t rowOffset = 0;
         for (int hIndex = 0; hIndex < H; hIndex++) {
             ++vecTaskIdx;
             if (vecTaskIdx % subBlockNum != subBlockIdx) {
@@ -123,37 +129,40 @@ __aicore__ inline void ChunkBwdDvLocalVector<QKVT, GT, Strategy>::Process()
             AscendC::DataCopyPad(gLocalTensor, gGm[curBatchId * H * T + hIndex * T + indexResult.curTokenId],
                                  copyParams, gPadParams);
             MTE2ToVSync();
-            AscendC::LocalTensor<float> gFp32LocalTensor = gFp32TBuf.template Get<float>();
-            // todo 增加fp32不用cast判断
-            AscendC::Cast(gFp32LocalTensor, gLocalTensor, AscendC::RoundMode::CAST_NONE, indexResult.chunkLen);
-
+            AscendC::LocalTensor<float> gFp32LocalTensor;
+            if constexpr (std::is_same<GT, float32_t>()) {
+                gFp32LocalTensor = gLocalTensor;
+            } else {
+                gFp32LocalTensor = gFp32TBuf.template Get<float>();
+                AscendC::Cast(gFp32LocalTensor, gLocalTensor, AscendC::RoundMode::CAST_NONE, indexResult.chunkLen);
+            } 
+            AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_3);
             AscendC::LocalTensor<float> kqFp32LocalTensor = kqFp32TBuf.template Get<float>();
             AscendC::LocalTensor<QKVT> kqLocalTensor = kqTQueIn.AllocTensor<QKVT>();
             AscendC::LocalTensor<QKVT> kqOutLocalTensor = kqTQueOut.AllocTensor<QKVT>();
-            AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_3);
+            
+            copyParams.blockLen = indexResult.chunkLen * sizeof(QKVT);
+            baseOffset = curBatchId * H * T * strategy.chunkSize + hIndex * T * strategy.chunkSize +
+                                 indexResult.curTokenId * strategy.chunkSize;
             for (int row = 0; row < indexResult.chunkLen; row++) {
-                AscendC::Adds(gFactorLocalTensor, gFp32LocalTensor, -1 * gFp32LocalTensor.GetValue(row),
+                rowOffset = baseOffset + row * strategy.chunkSize;
+                AscendC::Adds(gFactorLocalTensor, gFp32LocalTensor, -1 * gFp32LocalTensor.GetValue(rowOffset),
                               indexResult.chunkLen);
                 AscendC::Exp(gFactorLocalTensor, gFactorLocalTensor, indexResult.chunkLen);
                 AscendC::Duplicate<float>(gFactorLocalTensor, float(0.0), row);
                 AscendC::Muls(gFactorLocalTensor, gFactorLocalTensor, scale, indexResult.chunkLen);
                 // 搬运 k * q^T 一行
-                copyParams.blockLen = indexResult.chunkLen * sizeof(QKVT);
-                AscendC::DataCopyPad(kqLocalTensor,
-                                     workspaceGm[curBatchId * H * T * strategy.chunkSize + hIndex * T * strategy.chunkSize +
-                                                 indexResult.curTokenId * strategy.chunkSize + row * strategy.chunkSize],
-                                     copyParams, qkvPadParams);
+                AscendC::DataCopyPad(
+                    kqLocalTensor,
+                    workspaceGm[rowOffset],
+                    copyParams, qkvPadParams);
                 MTE2ToVSync();
                 AscendC::Cast(kqFp32LocalTensor, kqLocalTensor, AscendC::RoundMode::CAST_NONE, indexResult.chunkLen);
                 AscendC::Mul(gFactorLocalTensor, kqFp32LocalTensor, gFactorLocalTensor, indexResult.chunkLen);
                 AscendC::Cast(kqOutLocalTensor, gFactorLocalTensor, AscendC::RoundMode::CAST_NONE, strategy.chunkSize);
                 // 搬出到workspace
-                int64_t outAddr = curBatchId * H * T * strategy.chunkSize + hIndex * T * strategy.chunkSize +
-                                  indexResult.curTokenId * strategy.chunkSize + row * strategy.chunkSize;
-
                 VToMTE3Sync();
-
-                AscendC::DataCopy(workspaceGm[outAddr], kqOutLocalTensor, strategy.chunkSize);
+                AscendC::DataCopy(workspaceGm[rowOffset], kqOutLocalTensor, strategy.chunkSize);
                 MTE3ToVSync();
             }
             gTQueIn.FreeTensor(gLocalTensor);
