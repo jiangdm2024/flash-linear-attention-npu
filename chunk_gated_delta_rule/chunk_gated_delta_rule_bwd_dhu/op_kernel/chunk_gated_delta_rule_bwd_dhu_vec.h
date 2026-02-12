@@ -213,7 +213,9 @@ __aicore__ inline void GDRVec<DT, GT>::TailChunkProcess(uint32_t tailChunkLen)
     // 計算dv2 dv2 = bdv * exp(bg_last - bg) + dv[B,H,T,V]
     CalcDv2(gLast, curGmOffsetV, true);
     // updated dh
-    UpdateDh(gLastExp, curGmOffsetH, true, chunkIdx); 
+    if (chunkIdx != 0) {
+        UpdateDh(gLastExp, curGmOffsetH, true, chunkIdx); 
+    }
 }
 
 template <typename DT, typename GT>
@@ -278,6 +280,7 @@ template <typename DT, typename GT>
 __aicore__ inline void GDRVec<DT, GT>::CalcGatedQ(float& gLast, float& gLastExp) 
 {
     if (this->curCalcBT == 0) {
+        CrossCoreSetFlag<0x2, PIPE_MTE3>(CROSS_CORE_V2C_GQ);
         return;
     }
     if (this->subBlockIdx == 0) {
