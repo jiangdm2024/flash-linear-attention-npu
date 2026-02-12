@@ -1,0 +1,3 @@
+[submodule "op-plugin"]
+	path = op-plugin
+	url = https://gitcode.com/Ascend/op-plugin.git
