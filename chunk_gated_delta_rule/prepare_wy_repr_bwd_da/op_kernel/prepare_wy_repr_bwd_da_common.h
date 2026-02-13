@@ -68,15 +68,4 @@ __aicore__ inline void MTE2ToVSync()
     AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventIDMTE2ToV);
 }
 
-struct IndexResult {
-    int64_t curBatchId;
-    int64_t curTokenId;
-    int64_t chunkLen;
-
-    __aicore__ inline IndexResult(int64_t curBatchId_, int64_t curTokenId, int64_t chunkLen)
-        : curBatchId(curBatchId_), curTokenId(curTokenId), chunkLen(chunkLen)
-    {
-    }
-};
-
 #endif  // PREPARE_WY_REPR_BWD_DA_COMMON_H

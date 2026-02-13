@@ -203,10 +203,8 @@ public:
                                                 tla::MakeCoord(0, 0),
                                                 tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
                     // Compute block-scoped matrix multiply-add
-                    // AscendC::printf("CrossCoreWaitFlag\n");
                     blockMmadDA1(tensorBlockDw, tensorBlockKbg, tensorBlockDA1, actualBlockShape);
                     AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
-                    // AscendC::printf("CrossCoreSetFlag\n");
                 }
             }
         }
@@ -300,10 +298,8 @@ public:
                     auto tensorBlockDA5 = GetTile(tensorDA5,
                                                 tla::MakeCoord(0, 0),
                                                 tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
-                    
                     // Compute block-scoped matrix multiply-add
                     blockMmadDA5(tensorBlockDA4, tensorBlockAT, tensorBlockDA5, actualBlockShape);
-                    // 注意：这里可能需要设置计算完成的标志
                     AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
                 }
             }
@@ -444,11 +440,6 @@ __aicore__ void inline PrepareWyReprBwdDAProcess<kType, betaType>::Process() {
     using LayoutTagDA6 = layout::RowMajor;
     LayoutTagDA6 tagDA6 = LayoutTagDA6::MakeLayout<kType>(BT, BT);
 
-    // // 输出
-    // using LayoutTagDA = layout::RowMajor;
-    // LayoutTagDA tagDA = LayoutTagDA::MakeLayout<kType>(BT, BT);
-
-
     using ArchTag = Arch::AtlasA2;
     using DispatchPolicy = Gemm::MmadPingpong<ArchTag, true>;
     using L1TileShape = Shape<_128, _128, _256>;
@@ -491,8 +482,6 @@ __aicore__ void inline PrepareWyReprBwdDAProcess<kType, betaType>::Process() {
     auto layoutDA5 = MakeLayoutFromTag(tagDA5);
 
     auto layoutDA6 = MakeLayoutFromTag(tagDA6);
-
-    // auto LayoutDA = MakeLayoutFromTag(tagDA);
 
     // kernel level
     using MatmulKernel = Gemm::Kernel::PrepareWyReprBwdDATla<BlockMmadDA1, BlockMmadDA2, BlockMmadDA5, BlockMmadDA6>;
