@@ -512,6 +512,23 @@ def npu_chunk_gated_delta_rule_bwd_dhu(q, k, w, d_o, dv, g, gK, h0, dht, cu_seql
 def npu_prepare_wy_repr_bwd_full(k, v, beta, a, dA, dw, du, g, cu_seqlens, chunk_indices, chunk_size):
     return torch.empty(k.shape, dtype=k.dtype, device=k.device), torch.empty(v.shape, dtype=v.dtype, device=v.device), torch.empty(beta.shape, dtype=beta.dtype, device=beta.device), torch.empty(g.shape, dtype=g.dtype, device=g.device)
 
+@impl(m, "npu_chunk_bwd_dqkwg")
+def npu_chunk_bwd_dqkwg(q, k, v, g, h, dox, dh, dv, cu_seqlens_, chunk_indices_, scale, chunk_size):
+    chunk_num = len(cu_seqlens.size) - 1
+    B = q.size(0)
+    H = q.size(1)
+    T = q.size(2)
+    K = q.size(3)
+    V = dv.size(3)
+    dq_shape = [B,H,T,K]
+    dk_shape = [B,H,T,K]
+    dw_shape = [B,H,T,K]
+    dg_shape = [B,H,T]
+    return (torch.empty(tuple(dq_shape), dtype=q.dtype, device=q.device), 
+            torch.empty(tuple(dk_shape), dtype=q.dtype, device=q.device),
+            torch.empty(tuple(dw_shape), dtype=q.dtype, device=q.device),
+            torch.empty(tuple(dg_shape), dtype=g.dtype, device=g.device))
+
 @impl(m, "npu_moe_gating_top_k_softmax")
 def npu_moe_gating_top_k_softmax_meta(x, finished=None, k=1):
     x_dim = x.dim()
