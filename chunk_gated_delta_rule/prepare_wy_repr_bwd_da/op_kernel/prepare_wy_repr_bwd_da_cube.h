@@ -97,6 +97,9 @@ public:
         LayoutDA5 layoutDA5;
         GM_ADDR ptrDA6;
         LayoutDA6 layoutDA6;
+        GM_ADDR ptrCuSeqLens;
+        GM_ADDR ptrChunkIndices;
+        uint64_t chunkNum;
         uint64_t B = 1;
         uint64_t T = 32768;
         uint64_t H = 32;
@@ -120,6 +123,7 @@ public:
                GM_ADDR ptrAT_, LayoutAT layoutAT_,
                GM_ADDR ptrDA5_, LayoutDA5 layoutDA5_,
                GM_ADDR ptrDA6_, LayoutDA6 layoutDA6_,
+               GM_ADDR ptrCuSeqLens_, GM_ADDR ptrChunkIndices_, uint64_t chunkNum_,
                uint64_t B_, uint64_t T_, uint64_t H_, uint64_t K_, uint64_t V_, uint64_t BT_, uint64_t stage_)
             : ptrDw(ptrDw_),
               layoutDw(layoutDw_),
@@ -141,6 +145,9 @@ public:
               layoutDA5(layoutDA5_),
               ptrDA6(ptrDA6_),
               layoutDA6(layoutDA6_),
+              ptrCuSeqLens(ptrCuSeqLens_),
+              ptrChunkIndices(ptrChunkIndices_),
+              chunkNum(chunkNum_),
               B(B_),
               T(T_),
               H(H_),
@@ -164,28 +171,30 @@ public:
     void operator()<AscendC::AIC>(Params const &params) {
         Arch::Resource<ArchTag> resource;
         uint32_t coreIdx = AscendC::GetBlockIdx();
+        uint32_t coreLoops = params.chunkNum;
+        uint32_t bos = 0;
+        uint32_t eos = 0;
         {   // 计算第一个矩阵乘 dA_1 = dw @ kbg.T     V->C
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
             BlockMmadDA1 blockMmadDA1(resource);
-            uint32_t coreLoopsInB = CeilDiv(params.T, params.BT);
-            uint32_t coreLoops = params.B * coreLoopsInB;
             for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
-                uint32_t bIdx = loopIdx / coreLoopsInB;
-                uint32_t chunkIdx = loopIdx % coreLoopsInB;
+                GetChunkOffset(params.ptrCuSeqLens, params.ptrChunkIndices, params.B, params.H, params.T,
+                               params.BT, loopIdx, bos, eos);
+                uint32_t curChunkSize = eos - bos;
                 GemmCoord blockCoord{0, 0, 0};
-                GemmCoord actualBlockShape{static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.K)};
+                GemmCoord actualBlockShape{curChunkSize, curChunkSize, static_cast<uint32_t>(params.K)};
                 // AscendC::printf("actualBlockShape.m(%d)  actualBlockShape.n(%d)\n",actualBlockShape.m(), actualBlockShape.n());
                 for (int h = 0; h < params.H; h++) {
                     // Represent the full gm
                     AscendC::GlobalTensor<ElementDw> gmDw;
-                    gmDw.SetGlobalBuffer((__gm__ ElementDw *)params.ptrDw + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.K);
+                    gmDw.SetGlobalBuffer((__gm__ ElementDw *)params.ptrDw + (h * params.T + bos) * params.K);
                     AscendC::GlobalTensor<ElementKbg> gmKbg;
-                    gmKbg.SetGlobalBuffer((__gm__ ElementKbg *)params.ptrKbg + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.K);
+                    gmKbg.SetGlobalBuffer((__gm__ ElementKbg *)params.ptrKbg + (h * params.T + bos) * params.K);
                     AscendC::GlobalTensor<ElementDA1> gmDA1;
-                    gmDA1.SetGlobalBuffer((__gm__ ElementDA1 *)params.ptrDA1 + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
+                    gmDA1.SetGlobalBuffer((__gm__ ElementDA1 *)params.ptrDA1 + (h * params.T + bos) * params.BT);
                     // Represent the full tensors
                     auto tensorDw = tla::MakeTensor(gmDw, params.layoutDw, Arch::PositionGM{});
                     auto tensorKbg = tla::MakeTensor(gmKbg, params.layoutKbg, Arch::PositionGM{});
@@ -218,22 +227,21 @@ public:
             // AscendC::printf("###yzq CrossCoreSetFlag ### 2\n");
             // AscendC::printf("###yzq CrossCoreSetFlag ### 3\n");
             // AscendC::printf("###yzq CrossCoreSetFlag ### 4\n");
-            uint32_t coreLoopsInB = CeilDiv(params.T, params.BT);
-            uint32_t coreLoops = params.B * coreLoopsInB;
             BlockMmadDA2 blockMmadDA2(resource);
             for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
-                uint32_t bIdx = loopIdx / coreLoopsInB;
-                uint32_t chunkIdx = loopIdx % coreLoopsInB;
+                GetChunkOffset(params.ptrCuSeqLens, params.ptrChunkIndices, params.B, params.H, params.T,
+                               params.BT, loopIdx, bos, eos);
+                uint32_t curChunkSize = eos - bos;
                 GemmCoord blockCoord{0, 0, 0};
-                GemmCoord actualBlockShape{static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.V)};
+                GemmCoord actualBlockShape{curChunkSize, curChunkSize, static_cast<uint32_t>(params.V)};
                 for (int h = 0; h < params.H; h++) {
                     // Represent the full gm
                     AscendC::GlobalTensor<ElementDu> gmDu;
-                    gmDu.SetGlobalBuffer((__gm__ ElementDu *)params.ptrDu + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.V);
+                    gmDu.SetGlobalBuffer((__gm__ ElementDu *)params.ptrDu + (h * params.T + bos) * params.V);
                     AscendC::GlobalTensor<ElementVb> gmVb;
-                    gmVb.SetGlobalBuffer((__gm__ ElementVb *)params.ptrVb + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.V);
+                    gmVb.SetGlobalBuffer((__gm__ ElementVb *)params.ptrVb + (h * params.T + bos) * params.V);
                     AscendC::GlobalTensor<ElementDA2> gmDA2;
-                    gmDA2.SetGlobalBuffer((__gm__ ElementDA2 *)params.ptrDA2 + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
+                    gmDA2.SetGlobalBuffer((__gm__ ElementDA2 *)params.ptrDA2 + (h * params.T + bos) * params.BT);
 
                     // Represent the full tensors
                     auto tensorDu = tla::MakeTensor(gmDu, params.layoutDu, Arch::PositionGM{});
@@ -265,22 +273,21 @@ public:
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
-            uint32_t coreLoopsInB = CeilDiv(params.T, params.BT);
-            uint32_t coreLoops = params.B * coreLoopsInB;
             BlockMmadDA5 blockMmadDA5(resource);
             for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
-                uint32_t bIdx = loopIdx / coreLoopsInB;
-                uint32_t chunkIdx = loopIdx % coreLoopsInB;
-                GemmCoord actualBlockShape{static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.BT)};
-                
+                GetChunkOffset(params.ptrCuSeqLens, params.ptrChunkIndices, params.B, params.H, params.T,
+                               params.BT, loopIdx, bos, eos);
+                uint32_t curChunkSize = eos - bos;
+                GemmCoord blockCoord{0, 0, 0};
+                GemmCoord actualBlockShape{curChunkSize, curChunkSize, curChunkSize};
                 for (int h = 0; h < params.H; h++) {
                     // Represent the full gm
                     AscendC::GlobalTensor<ElementDA4> gmDA4;
-                    gmDA4.SetGlobalBuffer((__gm__ ElementDA4 *)params.ptrDA4 + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
+                    gmDA4.SetGlobalBuffer((__gm__ ElementDA4 *)params.ptrDA4 + (h * params.T + bos) * params.BT);
                     AscendC::GlobalTensor<ElementAT> gmAT;
-                    gmAT.SetGlobalBuffer((__gm__ ElementAT *)params.ptrAT + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
+                    gmAT.SetGlobalBuffer((__gm__ ElementAT *)params.ptrAT + (h * params.T + bos) * params.BT);
                     AscendC::GlobalTensor<ElementDA5> gmDA5;
-                    gmDA5.SetGlobalBuffer((__gm__ ElementDA5 *)params.ptrDA5 + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
+                    gmDA5.SetGlobalBuffer((__gm__ ElementDA5 *)params.ptrDA5 + (h * params.T + bos) * params.BT);
 
                     // Represent the full tensors
                     auto tensorDA4 = tla::MakeTensor(gmDA4, params.layoutDA4, Arch::PositionGM{});
@@ -306,21 +313,21 @@ public:
         }
         AscendC::SyncAll<false>();
         {   // 计算第四个矩阵乘 dA_6 = A.T @ dA_5
-            uint32_t coreLoopsInB = CeilDiv(params.T, params.BT);
-            uint32_t coreLoops = params.B * coreLoopsInB;
             BlockMmadDA6 blockMmadDA6(resource);
             for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
-                uint32_t bIdx = loopIdx / coreLoopsInB;
-                uint32_t chunkIdx = loopIdx % coreLoopsInB;
-                GemmCoord actualBlockShape{static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.BT)};
+                GetChunkOffset(params.ptrCuSeqLens, params.ptrChunkIndices, params.B, params.H, params.T,
+                               params.BT, loopIdx, bos, eos);
+                uint32_t curChunkSize = eos - bos;
+                GemmCoord blockCoord{0, 0, 0};
+                GemmCoord actualBlockShape{curChunkSize, curChunkSize, curChunkSize};
                 for (int h = 0; h < params.H; h++) {
                     // Represent the full gm
                     AscendC::GlobalTensor<ElementAT> gmAT;
-                    gmAT.SetGlobalBuffer((__gm__ ElementAT *)params.ptrAT + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
+                    gmAT.SetGlobalBuffer((__gm__ ElementAT *)params.ptrAT + (h * params.T + bos) * params.BT);
                     AscendC::GlobalTensor<ElementDA5> gmDA5;
-                    gmDA5.SetGlobalBuffer((__gm__ ElementDA5 *)params.ptrDA5 + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
+                    gmDA5.SetGlobalBuffer((__gm__ ElementDA5 *)params.ptrDA5 + (h * params.T + bos) * params.BT);
                     AscendC::GlobalTensor<ElementDA6> gmDA6;
-                    gmDA6.SetGlobalBuffer((__gm__ ElementDA6 *)params.ptrDA6 + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
+                    gmDA6.SetGlobalBuffer((__gm__ ElementDA6 *)params.ptrDA6 + (h * params.T + bos) * params.BT);
 
                     // Represent the full tensors
                     auto tensorAT = tla::MakeTensor(gmAT, params.layoutAT, Arch::PositionGM{});
@@ -358,7 +365,9 @@ template <typename kType, typename betaType>
 class PrepareWyReprBwdDAProcess {
 public:
      /** @brief constructor */
-    __aicore__ inline PrepareWyReprBwdDAProcess(GM_ADDR k_, GM_ADDR v_, GM_ADDR beta_, GM_ADDR A_, GM_ADDR dw_, GM_ADDR du_, GM_ADDR g_, GM_ADDR dA_, GM_ADDR workspace_);
+    __aicore__ inline PrepareWyReprBwdDAProcess(GM_ADDR k_, GM_ADDR v_, GM_ADDR beta_, GM_ADDR A_, GM_ADDR dw_,
+                                                GM_ADDR du_, GM_ADDR g_, GM_ADDR cu_seqlens_, GM_ADDR chunk_indices_,
+                                                GM_ADDR dA_, GM_ADDR workspace_);
     __aicore__ inline void Process();
     __aicore__ inline void Init(const PrepareWyReprBwdDaTilingData &tiling);
 private:
@@ -376,6 +385,8 @@ private:
     GM_ADDR dw;
     GM_ADDR du;
     GM_ADDR g;
+    GM_ADDR cu_seqlens;
+    GM_ADDR chunk_indices;
     GM_ADDR dA;
     GM_ADDR workspace;
 };
@@ -389,6 +400,8 @@ __aicore__ inline PrepareWyReprBwdDAProcess<kType, betaType>::PrepareWyReprBwdDA
     GM_ADDR dw_,
     GM_ADDR du_,
     GM_ADDR g_,
+    GM_ADDR cu_seqlens_,
+    GM_ADDR chunk_indices_,
     GM_ADDR dA_,
     GM_ADDR workspace_)
     : k(k_),
@@ -398,6 +411,8 @@ __aicore__ inline PrepareWyReprBwdDAProcess<kType, betaType>::PrepareWyReprBwdDA
       dw(dw_),
       du(du_),
       g(g_),
+      cu_seqlens(cu_seqlens_),
+      chunk_indices(chunk_indices_),
       dA(dA_),
       workspace(workspace_)
 {
@@ -510,6 +525,9 @@ __aicore__ void inline PrepareWyReprBwdDAProcess<kType, betaType>::Process() {
         A, layoutAT,
         ptrDA5, layoutDA5,
         ptrDA6, layoutDA6,
+        cu_seqlens,
+        chunk_indices,
+        chunkNum,
         B, T, H, K, V, BT, 4};
 
     kernel(param);

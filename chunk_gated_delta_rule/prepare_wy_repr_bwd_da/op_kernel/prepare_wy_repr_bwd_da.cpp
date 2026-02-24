@@ -21,21 +21,24 @@
 // #include "kernel_basic_intf.h"
 
 using namespace AscendC;
-__global__ __aicore__ void prepare_wy_repr_bwd_da(GM_ADDR k, GM_ADDR v, GM_ADDR beta, GM_ADDR A, GM_ADDR dw, GM_ADDR du, GM_ADDR g, GM_ADDR mask, GM_ADDR cu_seqlens, GM_ADDR chunk_indices,
-                                                    GM_ADDR dA, GM_ADDR workspace, GM_ADDR tiling)
+__global__ __aicore__ void prepare_wy_repr_bwd_da(GM_ADDR k, GM_ADDR v, GM_ADDR beta, GM_ADDR A, GM_ADDR dw, GM_ADDR du,
+                                                  GM_ADDR g, GM_ADDR mask, GM_ADDR cu_seqlens, GM_ADDR chunk_indices,
+                                                  GM_ADDR dA, GM_ADDR workspace, GM_ADDR tiling)
 {
     AscendC::AscendCUtils::SetOverflow(1);
     GET_TILING_DATA(tilingData, tiling);
     if (TILING_KEY_IS(1)) {
         KERNEL_TASK_TYPE(1, KERNEL_TYPE_MIX_AIC_1_2);
         if ASCEND_IS_AIC{
-            PrepareWyReprBwdDAProcess<DTYPE_K, DTYPE_BETA> prepareWyReprBwdDAProcess(k, v, beta, A, dw, du, g, dA, workspace);
+            PrepareWyReprBwdDAProcess<DTYPE_K, DTYPE_BETA> prepareWyReprBwdDAProcess(
+                k, v, beta, A, dw, du, g, cu_seqlens, chunk_indices, dA, workspace);
             prepareWyReprBwdDAProcess.Init(tilingData);
             prepareWyReprBwdDAProcess.Process();
         }
         if ASCEND_IS_AIV{
             AscendC::TPipe tPipe;
-            PrepareWyReprBwdDAVectorProcess<DTYPE_K, DTYPE_BETA> prepareWyReprBwdDAVectorProcess(k, v, beta, A, dw, du, g, mask, dA, workspace);
+            PrepareWyReprBwdDAVectorProcess<DTYPE_K, DTYPE_BETA> prepareWyReprBwdDAVectorProcess(
+                k, v, beta, A, dw, du, g, mask, cu_seqlens, chunk_indices, dA, workspace);
             prepareWyReprBwdDAVectorProcess.Init(tilingData, &tPipe);
             prepareWyReprBwdDAVectorProcess.Process();
         }

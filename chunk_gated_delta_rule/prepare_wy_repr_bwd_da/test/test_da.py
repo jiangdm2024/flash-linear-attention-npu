@@ -128,9 +128,9 @@ def compute_dA_cpu(
         o_t = i_t * BT + torch.arange(0, BT, dtype=torch.int32)
         m_t = o_t < T
         m_A = (o_t[:, None] > o_t[None, :]) & (m_t[:, None] & m_t)
-        # print("==== m_A.shape = ", m_A.shape)
-        # print("==== m_A ====")
-        # print(m_A)
+        print("==== m_A.shape = ", m_A.shape)
+        print("==== m_A ====")
+        print(m_A)
 
         # 全1因果掩码m_A
         # m_A = torch.triu(torch.ones(BT, BT, device="cpu"), diagonal=1).bool() # [BT, BT]
@@ -233,8 +233,13 @@ def test_variable():
     print(f"==== du.shape = {du.shape} ")
     g = create_tensor((B, H, T), dtype=torch.float)
     print(f"==== g.shape = {g.shape} ")
-    
-    cu_seqlens = k.new_tensor([0, 64,128], dtype=torch.long)
+
+    lower_tri_matrix = bool_matrix_lower_tri_to_uint8(chunk_size)
+    print(f"==== lower_tri_matrix.shape = {lower_tri_matrix.shape}")
+    print("==== lower_tri_matrix ====")
+    print(lower_tri_matrix)
+
+    cu_seqlens = k.new_tensor([0, 64, 128], dtype=torch.long)
     chunk_indices = prepare_chunk_indices(cu_seqlens, chunk_size)
     print(f"==== chunk_indices.shape = {chunk_indices.shape} ",chunk_indices)
 
@@ -245,15 +250,24 @@ def test_variable():
     dw_npu = dw.npu()
     du_npu = du.npu()
     g_npu = g.npu()
+    lower_tri_matrix_npu = lower_tri_matrix.npu()
     if cu_seqlens is not None:
         cu_seqlens_npu = cu_seqlens.npu()
         chunk_indices_npu = chunk_indices.npu()
 
-    dA = torch_npu.npu_prepare_wy_repr_bwd_da(k_npu, v_npu, beta_npu, A_npu, dw_npu, du_npu, g_npu, lower_tri_matrix=upper_tri_matrix_npu, cu_seqlens=cu_seqlens_npu, chunk_indices = chunk_indices_npu, chunk_size =chunk_size)
+    dA_npu = torch_npu.npu_prepare_wy_repr_bwd_da(k_npu, v_npu, beta_npu, A_npu, dw_npu, du_npu, g_npu, lower_tri_matrix=lower_tri_matrix_npu, cu_seqlens=cu_seqlens_npu, chunk_indices=chunk_indices_npu, chunk_size=chunk_size)
+    torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_var_npu.pt")
+    # torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_var_npu_model_case.pt")
+    # print(f"==== dA_npu.shape = {dA_npu.shape} ")
+    # print(f"==== dA_npu = {dA_npu} ")
+    # print(f"==== dA_npu.dtype = {dA_npu.dtype} ")
+    # print(f"==== dA_npu.dtype = {dA_npu.dtype} ")
 
-    print(f"==== dA.shape = {dA.shape} ")
-    print(f"==== dA = {dA} ")
-    print(f"==== dA.dtype = {dA.dtype} ")
+    NT = len(chunk_indices)
+    print("==== NT = ", NT)
+    dA_cpu = compute_dA_cpu(A, dw, g, beta, k, v, du, chunk_indices, cu_seqlens, B, H, T, K, BT, NT)
+    torch.save(dA_cpu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_var_cpu.pt")
+    # torch.save(dA_cpu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_var_cpu_model_case.pt")
 
 def test_fix():
     # B, H, T, K, V = 1, 2, 128, 128, 128
@@ -310,6 +324,7 @@ def test_fix():
 
     dA_npu = torch_npu.npu_prepare_wy_repr_bwd_da(k_npu, v_npu, beta_npu, A_npu, dw_npu, du_npu, g_npu, lower_tri_matrix=lower_tri_matrix_npu, cu_seqlens=None, chunk_indices=None, chunk_size=chunk_size)
     torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_npu.pt")
+    # torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_npu_model_case.pt")
     # print(f"==== dA_npu.shape = {dA_npu.shape} ")
     # print(f"==== dA_npu = {dA_npu} ")
     # print(f"==== dA_npu.dtype = {dA_npu.dtype} ")
@@ -321,6 +336,7 @@ def test_fix():
     print("==== NT = ", NT)
     dA_cpu = compute_dA_cpu(A, dw, g, beta, k, v, du, chunk_indices, cu_seqlens, B, H, T, K, BT, NT)
     torch.save(dA_cpu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_cpu.pt")
+    # torch.save(dA_cpu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_cpu_model_case.pt")
 
 def create_tensor(shape, dtype=torch.float16):
 
@@ -330,7 +346,7 @@ def create_tensor(shape, dtype=torch.float16):
 
 if __name__ == "__main__":
     torch.manual_seed(0)
-    # print("==== test_variable ====")
-    # test_variable()
-    print("==== test_fix ====")
-    test_fix()
+    print("==== test_variable ====")
+    test_variable()
+    # print("==== test_fix ====")
+    # test_fix()

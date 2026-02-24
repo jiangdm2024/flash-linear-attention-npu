@@ -386,6 +386,7 @@ static void PrepareWyReprBwdDaTilingDataPrint(gert::TilingContext *context, Prep
     OP_LOGD(nodeName, "=== rowNumVBeta: %ld", tiling.get_rowNumVBeta());
     OP_LOGD(nodeName, "=== rowNumMDuDw: %ld", tiling.get_rowNumMDuDw());
     OP_LOGD(nodeName, "=== rowNumG: %ld", tiling.get_rowNumG());
+    OP_LOGD(nodeName, "=== isVariable: %ld", tiling.get_isVariable());
     OP_LOGD(nodeName, ">>>>>>>>>>>>>>> Print PrepareWyReprBwdDa tiling data end <<<<<<<<<<<<<<<<");
 }
 
