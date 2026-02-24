@@ -170,7 +170,7 @@ public:
             rowNum = rowNum / 2;
             
         }
-        tiling_.set_rowNumKBetaG(32);
+        tiling_.set_rowNumKBetaG(rowNum);
         return ge::GRAPH_SUCCESS;
     }
 
@@ -199,7 +199,7 @@ public:
             }
             rowNum = rowNum / 2;
         }
-        tiling_.set_rowNumVBeta(32);
+        tiling_.set_rowNumVBeta(rowNum);
         return ge::GRAPH_SUCCESS;
     }
 
@@ -231,7 +231,7 @@ public:
             rowNum = rowNum / 2;
             
         }
-        tiling_.set_rowNumMDuDw(32);
+        tiling_.set_rowNumMDuDw(rowNum);
         return ge::GRAPH_SUCCESS;
     }
 
@@ -266,7 +266,7 @@ public:
             rowNum = rowNum / 2;
             
         }
-        tiling_.set_rowNumG(32);
+        tiling_.set_rowNumG(rowNum);
         return ge::GRAPH_SUCCESS;
     }
 
