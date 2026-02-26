@@ -165,9 +165,9 @@ def compute_dA_cpu(
         o_t = i_t * BT + torch.arange(0, BT, dtype=torch.int32)
         m_t = o_t < T
         m_A = (o_t[:, None] > o_t[None, :]) & (m_t[:, None] & m_t)
-        print("==== m_A.shape = ", m_A.shape)
-        print("==== m_A ====")
-        print(m_A)
+        # print("==== m_A.shape = ", m_A.shape)
+        # print("==== m_A ====")
+        # print(m_A)
 
         for i_b in range(B):
         # 遍历所有batch
@@ -389,5 +389,5 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     print("==== test_variable ====")
     test_variable()
-    # print("==== test_fix ====")
-    # test_fix()
+    print("==== test_fix ====")
+    test_fix()
