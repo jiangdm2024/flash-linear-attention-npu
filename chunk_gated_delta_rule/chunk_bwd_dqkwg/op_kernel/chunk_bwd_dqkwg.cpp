@@ -40,6 +40,7 @@ __global__ __aicore__ void chunk_bwd_dqkwg(
     GM_ADDR dv,             // [B, H, T, V]
     GM_ADDR cu_seqlens,     // [N+1] (optional)
     GM_ADDR chunk_indices,  // [num_chunks, 2] (optional)
+    GM_ADDR mask_a,         // [BT, BT]
     GM_ADDR dq,             // [B, H, T, K] - output
     GM_ADDR dk,             // [B, H, T, K] - output
     GM_ADDR dw,             // [B, H, T, K] - output
@@ -48,15 +49,18 @@ __global__ __aicore__ void chunk_bwd_dqkwg(
     GM_ADDR tiling          // . data
 )
 {
+
     // 设置溢出处理
     AscendCUtils::SetOverflow(1);
     
     // 根据 TilingKey 选择执行路径
     if (TILING_KEY_IS(1)) {
+
         // 使用 C-V 融合模式
         KERNEL_TASK_TYPE(1, KERNEL_TYPE_MIX_AIC_1_2);
         GET_TILING_DATA(tilingData, tiling);
         // AIC (Cube) 端执行
+
         if ASCEND_IS_AIC {
             ChunkBwdDqkwgCubeProcess<DTYPE_Q, DTYPE_G> cubeProcess(
                 q, k, v, g, h,
@@ -73,14 +77,15 @@ __global__ __aicore__ void chunk_bwd_dqkwg(
             TPipe tPipe; // 创建 TPipe 用于 Vector 端流水
             ChunkBwdDqkwgVectorProcess<DTYPE_Q, DTYPE_G> vectorProcess(
                 q, k, v, g, h,
-                do_, dh, dv, cu_seqlens, chunk_indices,
+                do_, dh, dv, cu_seqlens, chunk_indices, mask_a,
                 dq, dk, dw, dg,
                 workspace
             );
             vectorProcess.Init(tilingData, &tPipe);
             vectorProcess.Process();
         }
+
     }
-    
+
     return;
 }

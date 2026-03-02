@@ -6,6 +6,7 @@
 import numpy as np
 import torch
 import sys
+from ml_dtypes import bfloat16
 def compute_chunk_mapping(Lens, chunk_size=10):
     # Step 1: Compute how many chunks each sequence needs
 
@@ -43,9 +44,25 @@ def compute_chunk_mapping(Lens, chunk_size=10):
     return result
 
 
+
 from typing import Optional
 import pickle
 import math
+
+def bool_matrix_to_uint8(chunk_size):
+    # 创建反下三角矩阵（下三角为0，上三角为1）
+    bool_matrix = torch.tril(torch.ones(chunk_size, chunk_size, dtype=torch.bool))
+    bool_matrix = ~bool_matrix
+    # print(f"==== bool_matrix.shape = {bool_matrix.shape} ",bool_matrix)
+    # 将bool矩阵转换为uint8 (0或1)
+    uint8_matrix = bool_matrix.to(torch.uint8)
+    # 重塑为 (chunk_size, chunk_size//8, 8) 以便每8个bit打包
+    reshaped = uint8_matrix.reshape(chunk_size, chunk_size // 8, 8)
+    # 将每8个bit打包成一个uint8
+    # bit0 * 1 + bit1 * 2 + bit2 * 4 + ... + bit7 * 128
+    powers = torch.tensor([1,2,4,8,16,32,64,128], dtype=torch.uint8)
+    packed = (reshaped * powers).sum(dim=-1).to(torch.uint8)
+    return packed
 
 def prepare_lens(cu_seqlens: torch.LongTensor) -> torch.LongTensor:
     return cu_seqlens[1:] - cu_seqlens[:-1]
@@ -99,9 +116,10 @@ def get_inputs(pkl_path, transpose = True, dtype=torch.float16, gdtype=torch.flo
     cu_seqlens = data['cu_seqlens'].cpu().to(torch.int64) if data['cu_seqlens'] is not None else None
     scale = data['scale']
     chunk_size = data['chunk_size']
+    down_tri = bool_matrix_to_uint8(chunk_size)
     # chunk_indices = compute_chunk_mapping(cu_seqlens, chunk_size).astype(np.int64)
-    # chunk_indices = torch.load(f"{pkl_path}/chunk_indices.pt").numpy()
-    chunk_indices = data['chunk_indices'].numpy() if data['chunk_indices'] is not None else None
+    chunk_indices = torch.load(f"{pkl_path}/chunk_indices.pt").numpy() if data['cu_seqlens'] is not None else None
+    # chunk_indices = data['chunk_indices'].numpy() if data['chunk_indices'] is not None else None
     num_chunks = chunk_indices.shape[0] if chunk_indices is not None else q.shape[2] // chunk_size
     isVarLen = 0 if cu_seqlens is None else 1
     if True:
@@ -114,47 +132,84 @@ def get_inputs(pkl_path, transpose = True, dtype=torch.float16, gdtype=torch.flo
         print("dv", dv.dtype, dv.shape)
         print("do", do.dtype, do.shape)
         print("dh", dh.dtype, dh.shape)
+        print("down_tri", down_tri.dtype, down_tri.shape)
         print(f"scale = {scale}")
         print(f"chunk_size = {chunk_size}")
         print(f"num_chunks = {num_chunks}")
-        print(f"seqlen_nums = {cu_seqlens.shape[0]}")
+        print(f"seqlen_nums = {cu_seqlens.shape[0] if cu_seqlens is not None else None}")
         if isVarLen == 1:
             print("cu_seqlens", cu_seqlens.dtype, cu_seqlens.shape, cu_seqlens)
             print("chunk_indices", chunk_indices.dtype, chunk_indices.shape)
         else:
             print("isVarLen is False!")
         
+    if dtype == torch.bfloat16:
+        q.detach().to(torch.float32).numpy().astype(bfloat16).tofile(f"{pkl_path}/gen/q.bin")
+        k.detach().to(torch.float32).numpy().astype(bfloat16).tofile(f"{pkl_path}/gen/k.bin")
+        v.detach().to(torch.float32).numpy().astype(bfloat16).tofile(f"{pkl_path}/gen/v.bin")
+        h.detach().to(torch.float32).numpy().astype(bfloat16).tofile(f"{pkl_path}/gen/h.bin")
+        do.detach().to(torch.float32).numpy().astype(bfloat16).tofile(f"{pkl_path}/gen/do.bin")
+        dh.detach().to(torch.float32).numpy().astype(bfloat16).tofile(f"{pkl_path}/gen/dh.bin")
+        dv.detach().to(torch.float32).numpy().astype(bfloat16).tofile(f"{pkl_path}/gen/dv.bin")
+        w.detach().to(torch.float32).numpy().astype(bfloat16).tofile(f"{pkl_path}/gen/w.bin")
+    else:
+        q.detach().numpy().tofile(f"{pkl_path}/gen/q.bin")
+        k.detach().numpy().tofile(f"{pkl_path}/gen/k.bin")
+        v.detach().numpy().tofile(f"{pkl_path}/gen/v.bin")
+        h.detach().numpy().tofile(f"{pkl_path}/gen/h.bin")
+        do.detach().numpy().tofile(f"{pkl_path}/gen/do.bin")
+        dh.detach().numpy().tofile(f"{pkl_path}/gen/dh.bin")
+        dv.detach().numpy().tofile(f"{pkl_path}/gen/dv.bin")
+        w.detach().numpy().tofile(f"{pkl_path}/gen/w.bin")
+    if gdtype == torch.bfloat16:
+        g.detach().to(torch.float32).numpy().astype(bfloat16).tofile(f"{pkl_path}/gen/g.bin")
+    else:
+        g.detach().numpy().tofile(f"{pkl_path}/gen/g.bin")
+    down_tri.numpy().tofile(f"{pkl_path}/gen/down_tri.bin")
 
-    q.numpy().tofile(f"{pkl_path}/gen/q.bin")
-    k.numpy().tofile(f"{pkl_path}/gen/k.bin")
-    v.numpy().tofile(f"{pkl_path}/gen/v.bin")
-    h.numpy().tofile(f"{pkl_path}/gen/h.bin")
-    g.numpy().tofile(f"{pkl_path}/gen/g.bin")
-    do.numpy().tofile(f"{pkl_path}/gen/do.bin")
-    dh.numpy().tofile(f"{pkl_path}/gen/dh.bin")
-    dv.numpy().tofile(f"{pkl_path}/gen/dv.bin")
-    w.numpy().tofile(f"{pkl_path}/gen/w.bin")
     if cu_seqlens != None:
         cu_seqlens.numpy().tofile(f"{pkl_path}/gen/cu_seqlens.bin")
-    chunk_indices.tofile(f"{pkl_path}/gen/chunk_indices.bin")
+        chunk_indices.tofile(f"{pkl_path}/gen/chunk_indices.bin")
     # 写入配置文件
     with open(f"{pkl_path}/gen/config.cfg", 'w') as f:
         f.write(f"scale = {scale}\n")
         f.write(f"chunk_size = {chunk_size}\n")
         f.write(f"num_chunks = {num_chunks}\n")
         # f.write(f"num_chunks = {q.shape[2] // chunk_size}\n")
-        f.write(f"seqlen_nums = {cu_seqlens.shape[0]}\n")
+        f.write(f"seqlen_nums = {cu_seqlens.shape[0] if isVarLen == True else None}\n")
         f.write(f"B = {q.shape[0]}\n")
         f.write(f"H = {q.shape[1]}\n")
         f.write(f"T = {q.shape[2]}\n")
         f.write(f"K = {q.shape[3]}\n")
         f.write(f"V = {v.shape[3]}\n")
         f.write(f"isVarLen = {isVarLen}\n")
+        f.write(f"datatype = {str(dtype)}\n")
+        f.write(f"gtype = {str(gdtype)}\n")
     print(f"path is {pkl_path}")
 
 path = '/data/huangjunzhe/GDN/ops-transformer_GDN/chunk_gated_delta_rule/chunk_bwd_dqkwg/tests/result/cpu_for_test'
 # 示例: python script.py arg1 arg2
 if len(sys.argv) > 1:
     path = sys.argv[1]
-    print("path", path)
-get_inputs(path)
+    print("[prehandle] path: ", path)
+    try:
+        import os
+        os.makedirs(path+"/gen")
+    except:
+        pass
+if len(sys.argv) > 2:
+    if sys.argv[2] == "bf16" or sys.argv[1] == "bfloat16":
+        dtype = torch.bfloat16
+    else:
+        dtype = torch.float16
+else:
+    dtype = torch.float16
+if len(sys.argv) > 3:
+    if sys.argv[3] == "fp32" or sys.argv[2] == "float32":
+        gtype = torch.float32
+    else:
+        gtype = dtype
+else:
+    gtype = torch.float32
+print(f"[pre_handle] dtype {dtype}, gtype {gtype}, sys.argv[2] {sys.argv[2]}, sys.argv[3] {sys.argv[3]}")
+get_inputs(path, dtype=dtype, gdtype=gtype)

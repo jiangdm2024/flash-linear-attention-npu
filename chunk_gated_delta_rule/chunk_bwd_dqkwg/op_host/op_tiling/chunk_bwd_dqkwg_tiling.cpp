@@ -57,6 +57,21 @@ ASCENDC_EXTERN_C ge::graphStatus TilingChunkBwdDqkwg(gert::TilingContext* contex
     int64_t K = kStorageShape.GetDim(3);//CONST_K;
     int64_t V = vStorageShape.GetDim(3);//CONST_V;
     int64_t BT = CONST_BT;
+    auto attr = context->GetAttrs();
+    const int ATTR_CHUNK_SIZE_ITEM = 1;
+    const int32_t* chunkSizePtr = attr->GetAttrPointer<int32_t>(ATTR_CHUNK_SIZE_ITEM);
+    if (chunkSizePtr != nullptr) {
+        BT = *chunkSizePtr;
+        std::cout << "[tiling] BT: " << BT << "\n";
+        if (BT != 64 && BT != 128) {
+            std::cout << "BT should be 64 or 128 ." << std::endl;
+            return ge::GRAPH_FAILED;
+        }
+        
+    }
+
+
+
 
     auto cuSeqlensTensor = context->GetOptionalInputTensor(8);
     int64_t numChunks = CeilDiv(T, BT);  // = 32
@@ -73,6 +88,10 @@ ASCENDC_EXTERN_C ge::graphStatus TilingChunkBwdDqkwg(gert::TilingContext* contex
         }
         isVarLen = 1;
     }
+    if (isVarLen == 1 && B != 1) {
+        std::cout << "varlen mode only support B = 1, but now B = " << B << "." << std::endl;
+        return ge::GRAPH_FAILED;
+    }
 
     
     // std::cout << "[tiling] B: " << B << ", H: " << H << ", T: " << T << ", K: " << K << ", V: " << V << ", BT: " << BT << ", numChunks: " << numChunks << std::endl;
@@ -81,7 +100,7 @@ ASCENDC_EXTERN_C ge::graphStatus TilingChunkBwdDqkwg(gert::TilingContext* contex
     // 计算 scale = 1.0 / sqrt(K)
     // float scale = 1.0f / std::sqrt(static_cast<float>(K));
     const int ATTR_SCALE_ITEM = 0;
-    auto attr = context->GetAttrs();
+    
     const float* scalePtr = attr->GetAttrPointer<float>(ATTR_SCALE_ITEM);
     if (scalePtr == nullptr) {
         std::cout << "scale is nullptr!" << std::endl;
@@ -105,7 +124,8 @@ ASCENDC_EXTERN_C ge::graphStatus TilingChunkBwdDqkwg(gert::TilingContext* contex
     size_t mm5Size = B * H * T * BT * FP16_SIZE;                   // mm5 (q @ k^T)
     size_t dsTempSize = B * H * T * BT * FP16_SIZE;                // b_ds_temp
     size_t mm6Size = B * H * T * K * FP16_SIZE;                   // mm6
-    size_t mm7Size = B * H * T * K * FP16_SIZE;                   // mm6
+    size_t mm7Size = B * H * T * K * FP16_SIZE;                   // mm1
+    size_t mul1Size = B * H * T * BT * FP16_SIZE;                   // mul1
 
     
     // Workspace 偏移计算
@@ -115,22 +135,31 @@ ASCENDC_EXTERN_C ge::graphStatus TilingChunkBwdDqkwg(gert::TilingContext* contex
     // offset += dwSize;
     
     size_t wsDgLastOffset = offset;
+std::cout << "[tiling] offset: " << offset << ", dgLastSize: "<<dgLastSize<<"\n";
     offset += dgLastSize;
-    
+
     size_t wsMm5Offset = offset;
+std::cout << "[tiling] offset: " << offset << ", mm5Size: "<<mm5Size<<"\n";
     offset += mm5Size;
     
     size_t wsDsTempOffset = offset;
+std::cout << "[tiling] offset: " << offset << ", dsTempSize: "<<dsTempSize<<"\n";
     offset += dsTempSize;
 
     size_t wsMm6Offset = offset;
+std::cout << "[tiling] offset: " << mm6Size << ", mm6Size: "<<mm6Size<<"\n";
     offset += mm6Size;
 
     size_t wsMm7Offset = offset;
+std::cout << "[tiling] offset: " << offset << ", mm7Size: "<<mm7Size<<"\n";
     offset += mm7Size;
+
+    size_t wsMul1Offset = offset;
+std::cout << "[tiling] offset: " << offset << ", mul1Size: "<<mul1Size<<"\n";
+    offset += mul1Size;
     
     size_t totalUserWorkspace = offset;
-    // std::cout << "[tiling] totalUserWorkspace: " << totalUserWorkspace << ", sysWorkspaceSize: " << sysWorkspaceSize << "\n";
+    std::cout << "[tiling] totalUserWorkspace: " << totalUserWorkspace << ", sysWorkspaceSize: " << sysWorkspaceSize << "\n";
     
     // 设置 workspace 大小
     size_t* workspaces = context->GetWorkspaceSizes(1);
@@ -158,6 +187,7 @@ ASCENDC_EXTERN_C ge::graphStatus TilingChunkBwdDqkwg(gert::TilingContext* contex
     tilingData.set_totalWorkspaceSize(totalUserWorkspace);
     tilingData.set_wsMm6Offset(wsMm6Offset);
     tilingData.set_wsMm7Offset(wsMm7Offset);
+    tilingData.set_wsMul1Offset(wsMul1Offset);
     
     // 检查是否有 cu_seqlens 输入来判断 IS_VARLEN
     tilingData.set_isVarLen(isVarLen);
