@@ -241,7 +241,7 @@ public:
                     auto tensorBlockDw = GetTile(tensorDw, tla::MakeCoord(0, 0), 
                                                   tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
                     
-                    //blockMmadPart1(tensorBlockDv, tensorBlockH, tensorBlockDw, actualBlockShape);
+                    blockMmadPart1(tensorBlockDv, tensorBlockH, tensorBlockDw, actualBlockShape);
 
 
                     AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_0);

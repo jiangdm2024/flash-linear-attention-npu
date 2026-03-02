@@ -27,7 +27,7 @@ if [ "$compi" = "$compi_y" ]; then
     python3 test.py regen ${path} ${casefolder} #标杆生成pt
     # python3 test.py noregen ${path} # 从GPU输入读取内容,生成cpu结果
     python3 ${path}/../../pre_handle.py ${path} ${dtype} ${gtype} # pt -> bin
-    bash run.sh nocompile ${path} ##重新编译并运行/root/data_nvme0n1/huangjunzhe/GDN/target/test_aclnn_gdn.cpp
+    bash run.sh compile ${path} ##重新编译并运行/root/data_nvme0n1/huangjunzhe/GDN/target/test_aclnn_gdn.cpp
 fi
 
 if [ "$compi" = "$compi_y2" ]; then
@@ -42,13 +42,13 @@ export TORCH_DEVICE_BACKEND_AUTOLOAD=0
 python3 ${path}/../../to_py.py ${path} # bin -> pt
 echo "ct single ${path}/gen/dg_npu.pt ${path}/dg_cpu.pt --calc_count 1000000 --dtype xxx"
 ct single ${path}/gen/dw_npu.pt ${path}/gen/dw_cpu_ht.pt --calc_count 1000000 --dtype ${dtype}
-ct single ${path}/gen/dg_npu.pt ${path}/gen/dg_cpu_ht.pt --calc_count 1000000 --dtype ${dtype}
+ct single ${path}/gen/dg_npu.pt ${path}/gen/dg_cpu_ht.pt --calc_count 1000000 --dtype ${gtype}
 ct single ${path}/gen/dq_npu.pt ${path}/gen/dq_cpu_ht.pt --calc_count 1000000 --dtype ${dtype}
 ct single ${path}/gen/dk_npu.pt ${path}/gen/dk_cpu_ht.pt --calc_count 1000000 --dtype ${dtype}
-# ct viz ${path}/gen/dw_npu.pt ${path}/gen/dw_cpu_ht.pt
-# ct viz ${path}/gen/dg_npu.pt ${path}/gen/dg_cpu_ht.pt
-# ct viz ${path}/gen/dq_npu.pt ${path}/gen/dq_cpu_ht.pt
-# ct viz ${path}/gen/dk_npu.pt ${path}/gen/dk_cpu_ht.pt
+ct viz ${path}/gen/dw_npu.pt ${path}/gen/dw_cpu_ht.pt --out_dir ${path} --name dw
+ct viz ${path}/gen/dg_npu.pt ${path}/gen/dg_cpu_ht.pt --out_dir ${path} --name dg
+ct viz ${path}/gen/dq_npu.pt ${path}/gen/dq_cpu_ht.pt --out_dir ${path} --name dq
+ct viz ${path}/gen/dk_npu.pt ${path}/gen/dk_cpu_ht.pt --out_dir ${path} --name dk
 
 # ct dual ${path}/gen/dw_npu.pt ${path}/gen/dw_gpu_ht.pt ${path}/gen/dw_cpu_ht.pt --dtype ${dtype}
 # ct dual ${path}/gen/dg_npu.pt ${path}/gen/dg_gpu_ht.pt ${path}/gen/dg_cpu_ht.pt --dtype ${gtype}

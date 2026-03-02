@@ -444,6 +444,8 @@ if __name__ == "__main__":
             [64,8,1024,64,torch.float16,torch.float16,0.088,None],
             [64,8,1024,64,torch.float16,torch.float16,0.088,None],
             [64,8,1024,64,torch.float16,torch.float16,0.088,None],
+            [2,4,1024,64,torch.float16,torch.float16,0.088,None],  #21
+
         ]
         
 
@@ -503,8 +505,8 @@ if __name__ == "__main__":
 # g = torch.randn(B, T, H, dtype=gDtype, requires_grad=True) * 5e-2
 
         # print("chunk_indices", chunk_indices.shape,chunk_indices)
-        h = torch.randn(B, num_chunks, H, K, V, dtype=dtype, requires_grad=True) * 5e-7  # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
-        dh = torch.randn(B, num_chunks, H, K, V, dtype=dtype, requires_grad=True) * 5e-7  # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
+        h = torch.randn(B, num_chunks, H, K, V, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
+        dh = torch.randn(B, num_chunks, H, K, V, dtype=dtype, requires_grad=True) * 5e-7 * 100000 # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
         if isVarLen ==True:
             torch.save(chunk_indices.cpu(), f"{save_path}/chunk_indices.pt")
         import pickle
