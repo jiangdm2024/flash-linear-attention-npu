@@ -7,6 +7,10 @@ import numpy as np
 import torch
 import sys
 from ml_dtypes import bfloat16
+
+def pause():
+    print("pause")
+    input()
 def compute_chunk_mapping(Lens, chunk_size=10):
     # Step 1: Compute how many chunks each sequence needs
 
@@ -51,17 +55,24 @@ import math
 
 def bool_matrix_to_uint8(chunk_size):
     # 创建反下三角矩阵（下三角为0，上三角为1）
+    # print()
     bool_matrix = torch.tril(torch.ones(chunk_size, chunk_size, dtype=torch.bool))
+    # print(f"==== bool_matrix.shape = {bool_matrix.shape} ",bool_matrix)
     bool_matrix = ~bool_matrix
     # print(f"==== bool_matrix.shape = {bool_matrix.shape} ",bool_matrix)
     # 将bool矩阵转换为uint8 (0或1)
     uint8_matrix = bool_matrix.to(torch.uint8)
+    # print("uint8_matrix",uint8_matrix)
     # 重塑为 (chunk_size, chunk_size//8, 8) 以便每8个bit打包
     reshaped = uint8_matrix.reshape(chunk_size, chunk_size // 8, 8)
+    # print("reshaped",reshaped.shape,reshaped)
     # 将每8个bit打包成一个uint8
     # bit0 * 1 + bit1 * 2 + bit2 * 4 + ... + bit7 * 128
     powers = torch.tensor([1,2,4,8,16,32,64,128], dtype=torch.uint8)
+    # print("powers",(reshaped * powers))
     packed = (reshaped * powers).sum(dim=-1).to(torch.uint8)
+    # print("packed",packed)
+    # pause()
     return packed
 
 def prepare_lens(cu_seqlens: torch.LongTensor) -> torch.LongTensor:
@@ -211,5 +222,5 @@ if len(sys.argv) > 3:
         gtype = dtype
 else:
     gtype = torch.float32
-print(f"[pre_handle] dtype {dtype}, gtype {gtype}, sys.argv[2] {sys.argv[2]}, sys.argv[3] {sys.argv[3]}")
+print(f"[pre_handle] dtype {dtype}, gtype {gtype}")
 get_inputs(path, dtype=dtype, gdtype=gtype)

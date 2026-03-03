@@ -546,7 +546,15 @@ public:
                                                   tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
                     
                     blockMmadPart6(tensorBlockDsTemp, tensorBlockK, tensorBlockDq, actualBlockShape);
-
+// if(h==0 && loopIdx ==0) {
+//     DumpTensor(gmDsTemp,__LINE__,8);
+//     DumpTensor(gmDsTemp[128],__LINE__,8);
+//     DumpTensor(gmDsTemp[128*2],__LINE__,8);
+//     DumpTensor(gmDsTemp[128*3],__LINE__,8);
+//     DumpTensor(gmK,__LINE__,64);
+//     DumpTensor(gmDq,__LINE__,64);
+//     PipeBarrier<PIPE_ALL>();
+// }
                     AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_0);
                 }
             }

@@ -291,7 +291,8 @@ def chunk_bwd_dqkwg_cpu(
                 # dq += ds @ k
 
                 dq_intra = ds.to(torch.float32) @ k_c.to(torch.float32)
-                # print("dq_intra",dq_intra.dtype)
+                # print("ds.to(torch.float32)",ds.to(torch.float32))
+                # print("k_c.to(torch.float32)",k_c.to(torch.float32))
                 dq_intra = dq_intra.to(datatype).to(torch.float32)
                 # dk += ds.T @ q
                 dk_intra = ds.transpose(-1, -2).to(torch.float32) @ q_c.to(torch.float32)
@@ -306,6 +307,9 @@ def chunk_bwd_dqkwg_cpu(
                 else:
                     dq_total = dq_from_state + dq_intra
                     dk_total = dk_from_state + dk_intra
+                # print("dq_from_state", dq_from_state)
+                # print("dq_intra = ds.to(torch.float32) @ k_c.to(torch.float32)", dq_intra)
+                # print("dq_total", dq_total)
 
                 dq[b_idx, chunk_start_token_idx:chunk_end_token_idx, h_idx, :] = dq_total
                 dk[b_idx, chunk_start_token_idx:chunk_end_token_idx, h_idx, :] = dk_total
@@ -436,15 +440,15 @@ if __name__ == "__main__":
             [32,16,4096,128,torch.bfloat16,torch.bfloat16,0.0442,None],
             [16,32,8192,128,torch.float16,torch.float16,0.03125,None],
             [8,32,8192,128,torch.bfloat16,torch.bfloat16,0.0221,None],  #C12
-            [64,8,1024,64,torch.float16,torch.float16,0.088,None],
-            [64,8,1024,64,torch.float16,torch.float16,0.088,None],
-            [64,8,1024,64,torch.float16,torch.float16,0.088,None],
-            [64,8,1024,64,torch.float16,torch.float16,0.088,None],
-            [64,8,1024,64,torch.float16,torch.float16,0.088,None],
-            [64,8,1024,64,torch.float16,torch.float16,0.088,None],
-            [64,8,1024,64,torch.float16,torch.float16,0.088,None],
-            [64,8,1024,64,torch.float16,torch.float16,0.088,None],
-            [2,4,1024,64,torch.float16,torch.float16,0.088,None],  #21
+            [1,4,1024,64,torch.float16,torch.float16,0.088,None],
+            [48,8,2048,64,torch.bfloat16,torch.bfloat16,0.0625,None],
+            [24,16,4096,64,torch.float16,torch.float16,0.0442,None],
+            [12,32,8192,64,torch.bfloat16,torch.bfloat16,0.03125,None],
+            [1,16,32768,64,torch.float16,torch.float32,0.0625,torch.tensor([0,16,20000,30000,32768])],      # V1
+            [1,8,65536,64,torch.bfloat16,torch.bfloat16,0.0625,torch.tensor([0,16,20000,65536])],
+            [1,32,65536,64,torch.float16,torch.float32,0.0442,torch.tensor([0,16,20000,50000,65536])],
+            [1,32,262144,64,torch.bfloat16,torch.bfloat16,0.03125,torch.tensor([0,16,20000,50000,65536,210000,262144])],
+            [2,4,1024,128,torch.float16,torch.float16,0.088,None],  #21
 
         ]
         
@@ -465,7 +469,11 @@ if __name__ == "__main__":
             B, H = single_case[0], single_case[1]
             chunk_size = single_case[3]
             cu_seqlens = single_case[7]
-            isVarLen == single_case[7] != None
+            if single_case[7] is None:
+                isVarLen = False
+            else:
+                isVarLen = True
+            # isVarLen == single_case[7] != None
             T = single_case[2]
             scale = single_case[6]
 
@@ -484,12 +492,12 @@ if __name__ == "__main__":
             chunk_indices = None
             num_chunks = T // chunk_size
         
-        q = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7  # std≈5e-6#torch.randn([B, T, H, K], dtype=dtype)
+        q = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 # std≈5e-6#torch.randn([B, T, H, K], dtype=dtype)
         k = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, K], dtype=dtype)
         v = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 1000000  # torch.randn([B, T, H, V], dtype=dtype)
 
         g = torch.randn(B,T,H, dtype=dtype, requires_grad=True) * 5e-2  # torch.randn([B, T, H], dtype=Gtype)
-        do = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7  # torch.randn([B, T, H, V], dtype=dtype)
+        do = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, V], dtype=dtype)
 
         dv = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 1000000  # torch.randn([B, T, H, V], dtype=dtype)
         w = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, K], dtype=dtype)

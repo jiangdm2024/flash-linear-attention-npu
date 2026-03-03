@@ -27,7 +27,7 @@ if [ "$compi" = "$compi_y" ]; then
     python3 test.py regen ${path} ${casefolder} #标杆生成pt
     # python3 test.py noregen ${path} # 从GPU输入读取内容,生成cpu结果
     python3 ${path}/../../pre_handle.py ${path} ${dtype} ${gtype} # pt -> bin
-    bash run.sh compile ${path} ##重新编译并运行/root/data_nvme0n1/huangjunzhe/GDN/target/test_aclnn_gdn.cpp
+    bash run.sh nocompile ${path} ##重新编译并运行/root/data_nvme0n1/huangjunzhe/GDN/target/test_aclnn_gdn.cpp
 fi
 
 if [ "$compi" = "$compi_y2" ]; then
