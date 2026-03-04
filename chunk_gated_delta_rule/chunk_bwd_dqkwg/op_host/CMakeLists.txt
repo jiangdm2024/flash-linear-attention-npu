@@ -9,7 +9,7 @@
 # -----------------------------------------------------------------------------------------------------------
 add_op_to_compiled_list()
 if (BUILD_OPEN_PROJECT)
-    target_sources(op_host_aclnn PRIVATE
+    target_sources(op_host_aclnnExc PRIVATE
         chunk_bwd_dqkwg_def.cpp
     )
 endif()
@@ -22,5 +22,5 @@ if (BUILD_OPS_RTY_KERNEL) # 回黄kernel
                 -Werror
     )
 else()
-    add_modules_sources(OPTYPE chunk_bwd_dqkwg ACLNNTYPE aclnn)
+    add_modules_sources(OPTYPE chunk_bwd_dqkwg ACLNNTYPE aclnn_exclude)
 endif()

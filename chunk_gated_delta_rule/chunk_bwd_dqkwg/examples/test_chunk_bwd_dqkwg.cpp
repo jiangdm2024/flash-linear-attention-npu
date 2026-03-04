@@ -406,38 +406,43 @@ int main(int argc, char* argv[])
     ReadFile(DATAPATH + "dh.bin",dhShape,dhHostData);
     ret = CreateAclTensor(dhHostData, dhShape, &dhDeviceAddr, datatype, &dh);
     CHECK_RET(ret == ACL_SUCCESS, return ret);
-
-    aclTensor* cu_seqlens = nullptr;
+/*
+    std::vector<int64_t> tuningConfigData = {512};
+    aclIntArray *tuningConfig = aclCreateIntArray(tuningConfigData.data(), 1);
+*/
+    aclIntArray* cu_seqlens = nullptr;
     void* cu_seqlensDeviceAddr = nullptr;
     if (isVarLen == 1) {
         std::vector<int64_t> cu_seqlensShape = {seqlen_nums};
         std::vector<int64_t> cu_seqlensHostData(seqlen_nums, 0);
         ReadFile(DATAPATH + "cu_seqlens.bin",cu_seqlensShape,cu_seqlensHostData);
-        ret = CreateAclTensor(cu_seqlensHostData, cu_seqlensShape, &cu_seqlensDeviceAddr, aclDataType::ACL_INT64, &cu_seqlens);
+        // ret = CreateAclTensor(cu_seqlensHostData, cu_seqlensShape, &cu_seqlensDeviceAddr, aclDataType::ACL_INT64, &cu_seqlens);
+        cu_seqlens = aclCreateIntArray(cu_seqlensHostData.data(), cu_seqlensShape[0]);
         PrintVector(cu_seqlensHostData, "cu_seqlens");
-        CHECK_RET(ret == ACL_SUCCESS, return ret);
+        // CHECK_RET(ret == ACL_SUCCESS, return ret);
     } else {
         std::cout << "isVarLen == FALSE!\n";
     }
 
-    aclTensor* chunk_indices = nullptr;
+    aclIntArray* chunk_indices = nullptr;
     void* chunk_indicesDeviceAddr = nullptr;
     std::vector<int64_t> chunk_indicesShape = {num_chunks, 2};
     std::vector<int64_t> chunk_indicesHostData(num_chunks * 2, 0);
     if (isVarLen == 1) {
         ReadFile(DATAPATH + "chunk_indices.bin",chunk_indicesShape,chunk_indicesHostData);
-        ret = CreateAclTensor(chunk_indicesHostData, chunk_indicesShape, &chunk_indicesDeviceAddr, aclDataType::ACL_INT64, &chunk_indices);
-        CHECK_RET(ret == ACL_SUCCESS, return ret);
+        // ret = CreateAclTensor(chunk_indicesHostData, chunk_indicesShape, &chunk_indicesDeviceAddr, aclDataType::ACL_INT64, &chunk_indices);
+        chunk_indices = aclCreateIntArray(chunk_indicesHostData.data(), num_chunks * 2);
+        // CHECK_RET(ret == ACL_SUCCESS, return ret);
     }
 
-    aclTensor* down_tri = nullptr;
-    void* downTriDeviceAddr = nullptr;
-    std::vector<int64_t> downTriShape = {chunk_size, chunk_size / 8};
-    std::vector<uint8_t> downTriHostData(B * H * num_chunks * K * V, 0);
-    // std::cout << "B * H * num_chunks * K * V: "<< B * H * num_chunks * K * V << "\n";
-    ReadFile(DATAPATH + "down_tri.bin",downTriShape,downTriHostData);
-    ret = CreateAclTensor(downTriHostData, downTriShape, &downTriDeviceAddr, aclDataType::ACL_UINT8, &down_tri);
-    CHECK_RET(ret == ACL_SUCCESS, return ret);
+    // aclTensor* down_tri = nullptr;
+    // void* downTriDeviceAddr = nullptr;
+    // std::vector<int64_t> downTriShape = {chunk_size, chunk_size / 8};
+    // std::vector<uint8_t> downTriHostData(B * H * num_chunks * K * V, 0);
+    // // std::cout << "B * H * num_chunks * K * V: "<< B * H * num_chunks * K * V << "\n";
+    // ReadFile(DATAPATH + "down_tri.bin",downTriShape,downTriHostData);
+    // ret = CreateAclTensor(downTriHostData, downTriShape, &downTriDeviceAddr, aclDataType::ACL_UINT8, &down_tri);
+    // CHECK_RET(ret == ACL_SUCCESS, return ret);
 
     aclTensor* dq = nullptr;
     void* dqDeviceAddr = nullptr;
@@ -478,7 +483,7 @@ int main(int argc, char* argv[])
     aclOpExecutor* executor;
 
     // 4. 调用aclnnAddExample第一段接口
-    ret = aclnnChunkBwdDqkwgGetWorkspaceSize(q, k, v, g, h, do_, dh, dv, cu_seqlens, chunk_indices, down_tri, scale,chunk_size, dq, dk, dw, dg, &workspaceSize, &executor);
+    ret = aclnnChunkBwdDqkwgGetWorkspaceSize(q, k, v, g, h, do_, dh, dv, cu_seqlens, chunk_indices, scale,chunk_size, dq, dk, dw, dg, &workspaceSize, &executor);
     CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnChunkBwdDqkwgGetWorkspaceSize failed. ERROR: %d\n", ret); return ret);
 
     // 根据第一段接口计算出的workspaceSize申请device内存

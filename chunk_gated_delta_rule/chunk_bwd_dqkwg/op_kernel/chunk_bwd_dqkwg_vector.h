@@ -94,7 +94,7 @@ private:
     // Global Tensors
     GlobalTensor<DataType> gmQ, gmK, gmV, gmDo, gmH, gmDh, gmDv;
     GlobalTensor<DataType> gmDq, gmDk, gmDw;
-    GlobalTensor<uint8_t> gmMaskA;
+    // GlobalTensor<uint8_t> gmMaskA;
     GlobalTensor<GType> gmG, gmDg;
     GlobalTensor<DataType> gmWorkspace;
     GlobalTensor<float> gmDgLast;
@@ -189,7 +189,7 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::Init(const C
     gmDo.SetGlobalBuffer((__gm__ DataType *)ptrDo);
     gmDh.SetGlobalBuffer((__gm__ DataType *)ptrDh);
     gmDv.SetGlobalBuffer((__gm__ DataType *)ptrDv);
-    gmMaskA.SetGlobalBuffer((__gm__ uint8_t *)ptrMaskA);
+    // gmMaskA.SetGlobalBuffer((__gm__ uint8_t *)ptrMaskA);
     
     gmDq.SetGlobalBuffer((__gm__ DataType *)ptrDq);
     gmDk.SetGlobalBuffer((__gm__ DataType *)ptrDk);

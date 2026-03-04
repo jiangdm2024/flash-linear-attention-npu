@@ -77,7 +77,7 @@ __global__ __aicore__ void chunk_bwd_dqkwg(
             TPipe tPipe; // 创建 TPipe 用于 Vector 端流水
             ChunkBwdDqkwgVectorProcess<DTYPE_Q, DTYPE_G> vectorProcess(
                 q, k, v, g, h,
-                do_, dh, dv, cu_seqlens, chunk_indices, mask_a,
+                do_, dh, dv, cu_seqlens, chunk_indices, nullptr,        //mask = nullptr
                 dq, dk, dw, dg,
                 workspace
             );

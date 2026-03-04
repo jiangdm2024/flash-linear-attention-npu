@@ -30,7 +30,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> npu_chunk_bwd_dqkwg(
     const at::Tensor &dox,
     const at::Tensor &dh,
     const at::Tensor &dv,
-    const at::Tensor &down_tri,
     const c10::optional<at::Tensor> &cu_seqlens,
     const c10::optional<at::Tensor> &chunk_indices,
     c10::optional<double> scale, 

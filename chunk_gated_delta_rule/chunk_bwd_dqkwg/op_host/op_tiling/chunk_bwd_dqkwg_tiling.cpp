@@ -82,10 +82,11 @@ ASCENDC_EXTERN_C ge::graphStatus TilingChunkBwdDqkwg(gert::TilingContext* contex
         OP_CHECK_NULL_WITH_CONTEXT(context, chunkIndicesShape);
         const gert::Shape chunkIndicesStorageShape = chunkIndicesShape->GetStorageShape();
         numChunks = chunkIndicesStorageShape.GetDim(0);
-        if (chunkIndicesStorageShape.GetDim(1) != 2) {
-            std::cout << "the 2nd dim of chunkIndicesStorageShape should be 2, but now is  " << chunkIndicesStorageShape.GetDim(1) << "!" << std::endl;
+        if (numChunks % 2 != 0) {
+            std::cout << "numChunks should be even, but now is " << chunkIndicesStorageShape.GetDim(1) << "!" << std::endl;
             return ge::GRAPH_FAILED;
         }
+        numChunks /= 2;
         isVarLen = 1;
     }
     if (isVarLen == 1 && B != 1) {
@@ -103,7 +104,7 @@ ASCENDC_EXTERN_C ge::graphStatus TilingChunkBwdDqkwg(gert::TilingContext* contex
     
     const float* scalePtr = attr->GetAttrPointer<float>(ATTR_SCALE_ITEM);
     if (scalePtr == nullptr) {
-        std::cout << "scale is nullptr!" << std::endl;
+        std::cout << "scale should not be nullptr!" << std::endl;
         return ge::GRAPH_FAILED;
     }
     float scale = *scalePtr;
