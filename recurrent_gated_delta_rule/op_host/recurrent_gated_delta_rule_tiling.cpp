@@ -1,5 +1,4 @@
 ﻿/**
-<<<<<<< ours
  * Copyright (c) 2025 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -7,15 +6,6 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
-=======
-* Copyright (c) 2025 Huawei Technologies Co., Ltd.
-* This program is free software, you can redistribute it and/or modify it under the terms and conditions of
-* Please refer to the License for details. You may not use this file except in compliance with the License.
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-* INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-* See LICENSE in the root of the software repository for the full text of the License.
-*/
->>>>>>> theirs
 
 /*!
  * \file recurrent_gated_delta_rule_tiling.cpp
@@ -532,7 +522,7 @@ int64_t RecurrentGatedDeltaRuleTiling::CalcVStepCoeff(int64_t aDk) const
 ge::graphStatus RecurrentGatedDeltaRuleTiling::FinalizeVStepFromUb(int64_t ubSize, int64_t usedUbBytes, int64_t coeff)
 {
     int64_t vStep = (ubSize - usedUbBytes) / coeff / 8 * 8; // 8 * sizeof(float) = 32
-    if (vStep < 8) {                                        // vStep娑撳秴鐨禍?
+    if (vStep < 8) {                                        
         OP_LOGE(context_->GetNodeName(), "vStep should be bigger than 8, shape is too big");
         return ge::GRAPH_FAILED;
     }

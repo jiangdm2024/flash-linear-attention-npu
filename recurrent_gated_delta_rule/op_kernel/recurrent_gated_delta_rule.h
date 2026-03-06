@@ -150,8 +150,18 @@ public:
         ComputeAvgload();
         int32_t seq1 = 0;
         for (uint64_t batch_i = 0; batch_i < B_; batch_i++) {
+            int32_t seqLen = cuSeqlensGm_.GetValue(batch_i);
+            if (seqLen <= 0) {
+                continue;
+            }
+            if (seqLen > static_cast<int32_t>(MAX_MTP)) {
+                return;
+            }
+            if (seq1 < 0 || seq1 > static_cast<int32_t>(T_) || (seq1 + seqLen) > static_cast<int32_t>(T_)) {
+                return;
+            }
             int32_t seq0 = seq1;
-            seq1 += cuSeqlensGm_.GetValue(batch_i);
+            seq1 += seqLen;
             uint32_t copyFlag = 0;
             uint64_t stateOffset;
             for (uint64_t head_i = 0; head_i < NV_; head_i++) {
@@ -160,9 +170,15 @@ public:
                 }
                 copyFlag++;
                 if (copyFlag == 1) {
-                    stateOffset = hasAcceptedTokens_ ?
-                                      ssmStateIndicesGm_.GetValue(seq0 + numAcceptedTokensGm_.GetValue(batch_i) - 1) :
-                                      ssmStateIndicesGm_.GetValue(seq0);
+                    int32_t stateTokenIdx = seq0;
+                    if (hasAcceptedTokens_) {
+                        int32_t acceptedTokenNum = numAcceptedTokensGm_.GetValue(batch_i);
+                        if (acceptedTokenNum <= 0 || acceptedTokenNum > seqLen) {
+                            return;
+                        }
+                        stateTokenIdx = seq0 + acceptedTokenNum - 1;
+                    }
+                    stateOffset = ssmStateIndicesGm_.GetValue(stateTokenIdx);
                     CopyInGamaBeta(seq0, seq1);
                 }
                 ProcessHead(seq0, seq1, head_i, stateOffset);
