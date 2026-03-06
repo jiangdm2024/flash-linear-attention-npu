@@ -3,68 +3,91 @@ import torch_npu
 from typing import Optional
 import math
 import ct
+import random
 
-def prepare_lens(cu_seqlens: torch.LongTensor) -> torch.LongTensor:
-    return cu_seqlens[1:] - cu_seqlens[:-1]
-
-def cdiv(a: torch.LongTensor
-    , b : int):
-    torch.empty
-    return (a + b - 1) // b
-
-def prepare_chunk_indices(
-    cu_seqlens: torch.LongTensor,
-    chunk_size: int
-) -> torch.LongTensor:
-
-    indices = torch.cat([torch.arange(n) for n in cdiv(prepare_lens(cu_seqlens), chunk_size).tolist()])
-    return torch.stack([indices.eq(0).cumsum(0) - 1, indices], 1).to(cu_seqlens)
-
-def prepare_cu_seqlens(T: int, L: int = 32, seed: int = 42) -> torch.LongTensor:
+def prepare_cu_seqlens(T: int, L: int = 32, seed: int = 42) -> list[int]:
     """
-    生成一个长度为 L 的 cu_seqlens 张量：
+    直接生成一个长度为 L 的 cu_seqlens 列表 (list[int])：
       - 以 0 开头，以 T 结尾
       - 严格单调递增，无重复
       - 所有值在 [0, T] 范围内
       - 可复现（固定随机种子）
+      
+    此函数完全避开 torch.Tensor，直接返回 Python 原生 list，
+    完美适配 npu 算子对 'Optional[list[int]]' 的类型要求。
 
     Args:
         T (int): 最大值（总 token 数）
-        L (int): 输出张量的长度（必须满足 2 <= L <= T + 1）
+        L (int): 输出列表的长度（必须满足 2 <= L <= T + 1）
         seed (int): 随机种子，默认 42
 
     Returns:
-        torch.LongTensor of shape [L]
+        list[int]: 例如 [0, 15, 32, ..., T]
     """
     if T < 1:
         raise ValueError("T must be at least 1.")
     if L < 2 or L > T + 1:
         raise ValueError(f"L must satisfy 2 <= L <= T + 1 (got L={L}, T={T}).")
 
-    # 固定随机种子
-    torch.manual_seed(seed)
+    # 固定随机种子 (使用 Python 标准库)
+    random.seed(seed)
 
     if L == 2:
         # 最简单情况：[0, T]
-        return torch.tensor([0, T], dtype=torch.long)
+        return [0, T]
 
     # 需要在 (0, T) 开区间内选择 L - 2 个不重复的整数作为中间点
-    # 候选集合：1, 2, ..., T-1 （共 T-1 个数）
-    candidates = torch.arange(1, T)  # shape: [T-1]
-
-    # 从 T-1 个候选中无放回随机抽取 L-2 个
-    indices = torch.randperm(T - 1)[:L - 2]
-    middle_points = candidates[indices]
-    middle_points = torch.sort(middle_points).values  # 确保递增
+    # 候选集合：1, 2, ..., T-1
+    # random.sample 直接返回不重复的列表，无需担心重复
+    middle_points = random.sample(range(1, T), L - 2)
+    
+    # 必须排序以保证单调递增
+    middle_points.sort()
 
     # 拼接：0 + 中间点 + T
-    cu_seqlens = torch.cat([
-        torch.tensor([0], dtype=torch.long),
-        middle_points,
-        torch.tensor([T], dtype=torch.long)
-    ])
+    # 这里的 0, middle_points 中的元素, T 都是纯 Python int
+    cu_seqlens = [0] + middle_points + [T]
 
-    return cu_seqlens.long()
+    return cu_seqlens
+
+def prepare_chunk_indices(
+    cu_seqlens: list[int],
+    chunk_size: int
+) -> list[int]: 
+    """
+    基于 cu_seqlens (list[int]) 生成 chunk 索引。
+    
+    注意：原 PyTorch 版本返回的是 shape [N, 2] 的 Tensor。
+    为了保持纯 Python 兼容性，这里返回 list[tuple[start_seq_idx, chunk_idx_in_seq]]。
+    如果算子需要扁平化的 list[int] (如 [s0, c0, s1, c1, ...])，请在调用前展开。
+    
+    逻辑复刻原代码：
+    1. 计算每个序列的长度: lens[i] = cu_seqlens[i+1] - cu_seqlens[i]
+    2. 计算每个序列需要的 chunk 数: ceil(lens[i] / chunk_size)
+    3. 生成对应的 (sequence_id, chunk_id) 对
+    """
+    indices = []
+    
+    # 遍历每个序列段
+    for i in range(len(cu_seqlens) - 1):
+        start = cu_seqlens[i]
+        end = cu_seqlens[i+1]
+        length = end - start
+        
+        if length <= 0:
+            continue
+            
+        # 计算该序列需要多少个 chunk
+        # 等价于 cdiv(length, chunk_size)
+        num_chunks = (length + chunk_size - 1) // chunk_size
+        
+        for chunk_id in range(num_chunks):
+            # 原逻辑: indices.eq(0).cumsum(0) - 1 对应的是序列索引 i
+            # 原逻辑: indices 对应的是 chunk_id
+            indices.append((i))
+            indices.append((chunk_id))
+            
+    return indices
 
 def create_incremental_tensor(shape, dtype=torch.float16, start=1, step=1):
     total_elements = 1
@@ -101,8 +124,8 @@ def bool_matrix_lower_tri_to_uint8(chunk_size):
 
 def get_bos_eos(idx, T, chunk_size, cu_seqlens, chunk_indices):
     if cu_seqlens != None:
-        seqIdx = chunk_indices[idx][0]
-        chunkIdx = chunk_indices[idx][1]
+        seqIdx = chunk_indices[idx * 2]
+        chunkIdx = chunk_indices[idx * 2 + 1]
         bos = cu_seqlens[seqIdx] + chunkIdx * chunk_size
         eos = bos + chunk_size
         if eos > cu_seqlens[seqIdx + 1]:
@@ -123,8 +146,8 @@ def compute_dA_cpu(
     k: torch.Tensor,     # [B, H, T, K]
     v: torch.Tensor,      # [B, H, T, V]
     du: torch.Tensor,     # [B, H, T, V]
-    chunk_indices: torch.Tensor,  # [NT, 2] 包含 (seq_idx, chunk_idx) 索引
-    cu_seqlens: torch.Tensor,  # [B+1] 累积序列长度
+    chunk_indices: list[int],  # 扁平化的chunk索引 [seq_idx0, chunk_idx0, seq_idx1, chunk_idx1, ...]
+    cu_seqlens: list[int],  # 累积序列长度
     B: int,
     H: int,
     T: int,
@@ -147,11 +170,11 @@ def compute_dA_cpu(
         chunk_len = eos - bos
         if IS_VARLEN:
             # 从chunk_indices获取batch索引和chunk索引
-            # chunk_indices形状: [NT, 2]
-            seq_idx = chunk_indices[idx, 0].item()   # 等价于序列号i_n = tl.load(chunk_indices + idx * 2).to(tl.int32)
-            chunk_idx = chunk_indices[idx, 1].item()
+            # chunk_indices为扁平化列表: [seq_idx0, chunk_idx0, seq_idx1, chunk_idx1, ...]
+            seq_idx = chunk_indices[idx * 2]   # 等价于序列号i_n = tl.load(chunk_indices + idx * 2).to(tl.int32)
+            chunk_idx = chunk_indices[idx * 2 + 1]
             i_t = chunk_idx
-            T = cu_seqlens[seq_idx + 1].item() - cu_seqlens[seq_idx].item()
+            T = cu_seqlens[seq_idx + 1] - cu_seqlens[seq_idx]
         else:
             i_t = idx
 
@@ -278,15 +301,15 @@ def test_variable():
     g = create_tensor((B, H, T), dtype=torch.float)
     print(f"==== g.shape = {g.shape} ")
 
-    lower_tri_matrix = bool_matrix_lower_tri_to_uint8(chunk_size)
-    print(f"==== lower_tri_matrix.shape = {lower_tri_matrix.shape}")
-    print("==== lower_tri_matrix ====")
-    print(lower_tri_matrix)
+    # lower_tri_matrix = bool_matrix_lower_tri_to_uint8(chunk_size)
+    # print(f"==== lower_tri_matrix.shape = {lower_tri_matrix.shape}")
+    # print("==== lower_tri_matrix ====")
+    # print(lower_tri_matrix)
 
     cu_seqlens = prepare_cu_seqlens(T = T, L = 16)
     # cu_seqlens = k.new_tensor([0, 2, 2048], dtype=torch.long)
     chunk_indices = prepare_chunk_indices(cu_seqlens, chunk_size)
-    print(f"==== chunk_indices.shape = {chunk_indices.shape} ",chunk_indices)
+    print(f"==== chunk_indices len = {len(chunk_indices)}, chunk_indices[:20] = {chunk_indices[:20]}")
 
     k_npu = k.npu()
     v_npu = v.npu()
@@ -295,19 +318,16 @@ def test_variable():
     dw_npu = dw.npu()
     du_npu = du.npu()
     g_npu = g.npu()
-    lower_tri_matrix_npu = lower_tri_matrix.npu()
-    if cu_seqlens is not None:
-        cu_seqlens_npu = cu_seqlens.npu()
-        chunk_indices_npu = chunk_indices.npu()
+    # lower_tri_matrix_npu = lower_tri_matrix.npu()
 
-    dA_npu = torch_npu.npu_prepare_wy_repr_bwd_da(k_npu, v_npu, beta_npu, A_npu, dw_npu, du_npu, g_npu, lower_tri_matrix=lower_tri_matrix_npu, cu_seqlens=cu_seqlens_npu, chunk_indices=chunk_indices_npu, chunk_size=chunk_size)
+    dA_npu = torch_npu.npu_prepare_wy_repr_bwd_da(k_npu, v_npu, beta_npu, A_npu, dw_npu, du_npu, g_npu, cu_seqlens=cu_seqlens, chunk_indices=chunk_indices, chunk_size=chunk_size)
     torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/test_dA_var_npu.pt")
     # torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_var_npu_model_case.pt")
     print(f"==== dA_npu.shape = {dA_npu.shape} ")
     print(f"==== dA_npu = {dA_npu} ")
     print(f"==== dA_npu.dtype = {dA_npu.dtype} ")
 
-    NT = len(chunk_indices)
+    NT = len(chunk_indices) // 2
     print("==== NT = ", NT)
     dA_cpu = compute_dA_cpu(A, dw, g, beta, k, v, du, chunk_indices, cu_seqlens, B, H, T, K, BT, NT)
     torch.save(dA_cpu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/test_dA_var_cpu.pt")
@@ -348,10 +368,10 @@ def test_fix():
     g = create_tensor((B, H, T), dtype=torch.float)
     print(f"==== g.shape = {g.shape} ")
 
-    lower_tri_matrix = bool_matrix_lower_tri_to_uint8(chunk_size)
-    print(f"==== lower_tri_matrix.shape = {lower_tri_matrix.shape}")
-    print("==== lower_tri_matrix ====")
-    print(lower_tri_matrix)
+    # lower_tri_matrix = bool_matrix_lower_tri_to_uint8(chunk_size)
+    # print(f"==== lower_tri_matrix.shape = {lower_tri_matrix.shape}")
+    # print("==== lower_tri_matrix ====")
+    # print(lower_tri_matrix)
 
     k_npu = k.npu()
     v_npu = v.npu()
@@ -360,9 +380,9 @@ def test_fix():
     dw_npu = dw.npu()
     du_npu = du.npu()
     g_npu = g.npu()
-    lower_tri_matrix_npu = lower_tri_matrix.npu()
+    # lower_tri_matrix_npu = lower_tri_matrix.npu()
 
-    dA_npu = torch_npu.npu_prepare_wy_repr_bwd_da(k_npu, v_npu, beta_npu, A_npu, dw_npu, du_npu, g_npu, lower_tri_matrix=lower_tri_matrix_npu, cu_seqlens=None, chunk_indices=None, chunk_size=chunk_size)
+    dA_npu = torch_npu.npu_prepare_wy_repr_bwd_da(k_npu, v_npu, beta_npu, A_npu, dw_npu, du_npu, g_npu, cu_seqlens=None, chunk_indices=None, chunk_size=chunk_size)
     torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/test_dA_npu.pt")
     # torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_npu_model_case.pt")
     # print(f"==== dA_npu.shape = {dA_npu.shape} ")

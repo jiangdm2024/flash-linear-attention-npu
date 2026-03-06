@@ -26,9 +26,8 @@ static constexpr size_t INPUT_A_IDX = 3;
 static constexpr size_t INPUT_DW_IDX = 4;
 static constexpr size_t INPUT_DU_IDX = 5;
 static constexpr size_t INPUT_G_IDX = 6;
-static constexpr size_t INPUT_MASK_IDX = 7;
-static constexpr size_t INPUT_SEQLENS_IDX = 8;
-static constexpr size_t INPUT_CHUNK_INDICES_IDX = 9;
+static constexpr size_t INPUT_SEQLENS_IDX = 7;
+static constexpr size_t INPUT_CHUNK_INDICES_IDX = 8;
 
 static constexpr size_t ATTR_CHUNK_SIZE_IDX = 0;
 
@@ -54,7 +53,6 @@ static constexpr const char *const INPUT_A_NAME = "A";
 static constexpr const char *const INPUT_DW_NAME = "dw";
 static constexpr const char *const INPUT_DU_NAME = "du";
 static constexpr const char *const INPUT_G_NAME = "g";
-static constexpr const char *const INPUT_MASK_NAME = "mask";
 static constexpr const char *const INPUT_CHUNK_INDICES_NAME = "chunk_indices";
 
 static constexpr uint64_t SIZE_HALF = 2;
@@ -117,9 +115,6 @@ public:
                     , return ge::GRAPH_FAILED);
         OP_CHECK_IF(RequiredInputDimNumCheck(context_->GetRequiredInputShape(INPUT_G_IDX), DIM_NUM_3, INPUT_G_NAME) !=
                         ge::GRAPH_SUCCESS,
-                    , return ge::GRAPH_FAILED);
-        OP_CHECK_IF(RequiredInputDimNumCheck(context_->GetRequiredInputShape(INPUT_MASK_IDX), DIM_NUM_2,
-                                             INPUT_MASK_NAME) != ge::GRAPH_SUCCESS,
                     , return ge::GRAPH_FAILED);
         return ge::GRAPH_SUCCESS;
     }
@@ -279,7 +274,6 @@ public:
         const gert::Shape dwStorageShape = context_->GetRequiredInputShape(INPUT_DW_IDX)->GetStorageShape();
         const gert::Shape duStorageShape = context_->GetRequiredInputShape(INPUT_DU_IDX)->GetStorageShape();
         const gert::Shape gStorageShape = context_->GetRequiredInputShape(INPUT_G_IDX)->GetStorageShape();
-        const gert::Shape maskStorageShape = context_->GetRequiredInputShape(INPUT_MASK_IDX)->GetStorageShape();
         OP_CHECK_IF(CompareShape(vStorageShape, kStorageShape, INPUT_V_NAME, INPUT_K_NAME, DIM_NUM_3) !=
                         ge::GRAPH_SUCCESS,
                     , return ge::GRAPH_FAILED);
@@ -356,16 +350,16 @@ public:
     {
         const gert::StorageShape *chunkIndicesShape = context_->GetOptionalInputShape(INPUT_CHUNK_INDICES_IDX);
         OP_CHECK_NULL_WITH_CONTEXT(context_, chunkIndicesShape);
-        OP_CHECK_IF(RequiredInputDimNumCheck(chunkIndicesShape, DIM_2, INPUT_CHUNK_INDICES_NAME) != ge::GRAPH_SUCCESS, ,
+        OP_CHECK_IF(RequiredInputDimNumCheck(chunkIndicesShape, DIM_1, INPUT_CHUNK_INDICES_NAME) != ge::GRAPH_SUCCESS, ,
                     return ge::GRAPH_FAILED);
         const gert::Shape chunkIndicesStorageShape = chunkIndicesShape->GetStorageShape();
-        int64_t chunkIndicesDim1 = chunkIndicesStorageShape.GetDim(DIM_1);
-        OP_CHECK_IF(chunkIndicesDim1 != CHUNK_INDICES_DIM_1_SIZE,
+        int64_t chunkIndicesDim0 = chunkIndicesStorageShape.GetDim(DIM_0);
+        OP_CHECK_IF(chunkIndicesDim0 % 2 != 0,
                     OP_LOGE(context_->GetNodeName(),
-                            "Check chunk_indices shape failed, the dim 1 of chunk_indices should be 2, but get %ld.",
-                            chunkIndicesDim1),
+                            "Check chunk_indices shape failed, the dim 0 of chunk_indices should be even, but get %ld.",
+                            chunkIndicesDim0),
                     return ge::GRAPH_FAILED);
-        tiling_.set_chunkNum(chunkIndicesStorageShape.GetDim(DIM_0));
+        tiling_.set_chunkNum(chunkIndicesDim0 / 2);
 
         return ge::GRAPH_SUCCESS;
     }

@@ -23,7 +23,7 @@ class PrepareWyReprBwdDAVectorProcess {
 public:
      /** @brief constructor */
     __aicore__ inline PrepareWyReprBwdDAVectorProcess(GM_ADDR k_, GM_ADDR v_, GM_ADDR beta_, GM_ADDR A_, GM_ADDR dw_,
-                                                      GM_ADDR du_, GM_ADDR g_, GM_ADDR mask_, GM_ADDR cu_seqlens_,
+                                                      GM_ADDR du_, GM_ADDR g_, GM_ADDR cu_seqlens_,
                                                       GM_ADDR chunk_indices_, GM_ADDR dA_, GM_ADDR workspace_);
     __aicore__ inline void Init(const PrepareWyReprBwdDaTilingData& tiling, AscendC::TPipe *pipe_);
     __aicore__ inline void Process();
@@ -51,7 +51,6 @@ private:
     GM_ADDR dw;
     GM_ADDR du;
     GM_ADDR g;
-    GM_ADDR mask;
     GM_ADDR cu_seqlens;
     GM_ADDR chunk_indices;
     GM_ADDR dA;
@@ -62,7 +61,6 @@ private:
     GlobalTensor<kType> vTensor;
     GlobalTensor<betaType> gTensor;
     GlobalTensor<betaType> betaTensor;
-    GlobalTensor<uint8_t> maskTensor;
     GlobalTensor<kType> dATensor;
     GlobalTensor<kType> dA1Tensor;
     GlobalTensor<kType> dA2Tensor;
@@ -104,9 +102,9 @@ private:
 
 template <typename kType, typename betaType>
 __aicore__ inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::PrepareWyReprBwdDAVectorProcess(
-    GM_ADDR k_, GM_ADDR v_, GM_ADDR beta_, GM_ADDR A_, GM_ADDR dw_, GM_ADDR du_, GM_ADDR g_, GM_ADDR mask_,
-    GM_ADDR cu_seqlens_, GM_ADDR chunk_indices_, GM_ADDR dA_, GM_ADDR workspace_)
-    : k(k_), v(v_), beta(beta_), A(A_), dw(dw_), du(du_), g(g_), mask(mask_),
+    GM_ADDR k_, GM_ADDR v_, GM_ADDR beta_, GM_ADDR A_, GM_ADDR dw_, GM_ADDR du_, GM_ADDR g_, GM_ADDR cu_seqlens_,
+    GM_ADDR chunk_indices_, GM_ADDR dA_, GM_ADDR workspace_)
+    : k(k_), v(v_), beta(beta_), A(A_), dw(dw_), du(du_), g(g_),
       cu_seqlens(cu_seqlens_), chunk_indices(chunk_indices_), dA(dA_), workspace(workspace_) {}
 
 template <typename kType, typename betaType>
@@ -123,9 +121,6 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Init(
     rowNumVBeta = tiling.rowNumVBeta;
     rowNumMDuDw = tiling.rowNumMDuDw;
     rowNumG = tiling.rowNumG;
-    // AscendC::printf("####vector === B, T, H, K, V, BT: %ld, %ld, %ld, %ld, %ld, %ld\n", B, T, H, K, V, BT);
-    // printf("####vector === rowNumKBetaG, rowNumVBeta, rowNumMDuDw, rowNumG: %ld, %ld, %ld, %ld\n", rowNumKBetaG, rowNumVBeta, rowNumMDuDw, rowNumG);
-    // printf("####vector === chunkNum: %ld\n", chunkNum);
 
     pipe = pipe_;
     workSpaceTensor.SetGlobalBuffer((__gm__ kType *)workspace);
@@ -143,18 +138,13 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
     ProcessKBetaG();
     pipe->Reset();
     AscendC::SyncAll<false>();
-    // DumpTensor(dA1Tensor, 1, 4096);
     ProcessVBeta();
     pipe->Reset();
     AscendC::SyncAll<false>();
-    // DumpTensor(dA2Tensor, 2, 4096);
     ProcessMDuDw();
-    // DumpTensor(dA4Tensor, 4, 4096);
     pipe->Reset();
     AscendC::SyncAll<false>();
-    // DumpTensor(dA5Tensor, 5, 4096);
     ProcessG();
-    // DumpTensor(dA6Tensor, 6, 4096);
     return;
 }
 
@@ -195,7 +185,6 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
     auto tensorBetaBrcbfp32 = betaFp32BrcbBuf.Get<float32_t>();
     auto tensorGFp32 = gFp32Buf.Get<float32_t>();
 
-    // printf("coreIdx:%d, coreNumAic:%d\n",coreIdx, coreNumAic );
     for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += coreNumAic) {
         GetChunkOffset(cu_seqlens, chunk_indices, B, H, T, BT, loopIdx, bos, eos);
         uint32_t curChunkSize = eos - bos;
@@ -210,7 +199,6 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
                 auto kOffset = (h * T + bos + rowOffset) * K;
                 auto betaOffset = h * T + bos + rowOffset;
                 auto gOffset = h * T + bos + rowOffset;
-                //AscendC::printf("CrossCoreWaitFlag kOffset:%d, betaOffset:%d\n", kOffset, betaOffset);
                 // copyin
                 {
                     auto tensorKIn = kInQue.AllocTensor<kType>();
@@ -257,9 +245,7 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
                     PipeBarrier<PIPE_V>();
 
                     // brcb
-                    // DumpTensor(tensorBetafp32, 0,  8 * rowNum);
                     Brcb(tensorBetaBrcbfp32, tensorBetafp32, static_cast<uint8_t>(CeilDiv(curRowNum, 8)), {1, 8});
-                    // DumpTensor(tensorBetaBrcbfp32, 0,  8 * rowNum);
                     PipeBarrier<PIPE_V>();
 
                     // mul
@@ -270,7 +256,6 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
                             FP32_PER_REPEAT_64, curRowNum, {1, 1, 0, repeatStride, repeatStride, 1});
                         perchannelResOffset += FP32_PER_REPEAT_64;
                     }
-                    // DumpTensor(tensorKfp32, 1, K * rowNum);
                     PipeBarrier<PIPE_V>();
 
                     // 输出
@@ -290,7 +275,6 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_3);
         }
     }
-    // DumpTensor(workSpace2Tensor, 111,  8192);
     AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
     AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
     AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
@@ -326,7 +310,6 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
     auto tensorBetaFP32 = betaFp32Buf.Get<float32_t>();
     auto tensorBetaBrcbFP32 = betaFp32BrcbBuf.Get<float32_t>();
 
-    // AscendC::printf("---yzq--loopIdx:%d\n", coreIdx);
     for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
         GetChunkOffset(cu_seqlens, chunk_indices, B, H, T, BT, loopIdx, bos, eos);
         uint32_t curChunkSize = eos - bos;
@@ -340,7 +323,6 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
                 curRowNum = (rowOffset + rowNum) > curChunkSize ? curChunkSize - rowOffset : rowNum;
                 auto vOffset = (h * T + bos + rowOffset) * V;
                 auto betaOffset = h * T + bos + rowOffset;
-                // AscendC::printf("CrossCoreWaitFlag VOffset:%d, betaOffset:%d\n", vOffset, betaOffset);
                 // copyin
                 {
                     auto tensorVin = vInQue.AllocTensor<kType>();
@@ -368,7 +350,6 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
                     PipeBarrier<PIPE_V>();
                     // brcb
                     Brcb(tensorBetaBrcbFP32, tensorBetaFP32, static_cast<uint8_t>(CeilDiv(curRowNum, 8)), {1, 8});
-                    // DumpTensor(tensorBetaBrcbFP32, 0,  8 * rowNum);
                     PipeBarrier<PIPE_V>();
 
                     //mul
@@ -394,10 +375,8 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
                 }
             }
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_3);
-            // AscendC::printf("---hyh----CrossCoreSetFlag--363 AIV finish\n");
         }
     }
-    // DumpTensor(workSpace2Tensor, 222, 8192);
     AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
     AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
     AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
@@ -432,12 +411,24 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
     auto maskLocalTensor = maskTBuf.Get<uint8_t>();
     auto zeroFp32LocalTensor = zeroFp32TBuf.Get<float32_t>();
 
-    maskTensor.SetGlobalBuffer((__gm__ uint8_t *)mask);
-    AscendC::DataCopyExtParams copyParams{1, 0, 0, 0, 0};
-    copyParams.blockLen = BT * BT / BIT_NUM_FOR_UINT8;
-    AscendC::DataCopyPad(maskLocalTensor, maskTensor, copyParams, {false, 0, 0, 0});
-    // DumpTensor(maskLocalTensor, 1, BT * BT / BIT_NUM_FOR_UINT8);
-    MTE2ToVSync();
+    // 在本地生成下三角因果掩码（保留下三角j<i，屏蔽上三角j>=i）
+    // mask[i,j] = 1 if j >= i, 0 if j < i
+    uint32_t numBlocksPerRow = (BT + BIT_NUM_FOR_UINT8 - 1) / BIT_NUM_FOR_UINT8;
+    for (uint32_t row = 0; row < BT; ++row) {
+        for (uint32_t block = 0; block < numBlocksPerRow; ++block) {
+            uint32_t colStart = block * BIT_NUM_FOR_UINT8;
+            uint8_t maskVal = 0;
+            // 计算这个 block 中的每个 bit
+            for (uint32_t bit = 0; bit < BIT_NUM_FOR_UINT8 && (colStart + bit) < BT; ++bit) {
+                uint32_t col = colStart + bit;
+                // 下三角 j < i -> bit = 0, 上三角 j >= i -> bit = 1
+                if (col >= row) {
+                    maskVal |= (1 << bit);
+                }
+            }
+            maskLocalTensor.SetValue(row * numBlocksPerRow + block, maskVal);
+        }
+    }
     AscendC::Duplicate<float>(zeroFp32LocalTensor, float(0.0), ONE_BLOCK_32 / SIZE_FLOAT);
 
     for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += coreNumAic) {
@@ -495,7 +486,6 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_3);
         }
     }
-    // DumpTensor(dA4Tensor, 4, 4096);
     AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
     AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
     AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
@@ -539,12 +529,24 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
     auto maskLocalTensor = maskTBuf.Get<uint8_t>();
     auto zeroFp32LocalTensor = zeroFp32TBuf.Get<float32_t>();
 
-    maskTensor.SetGlobalBuffer((__gm__ uint8_t *)mask);
-    AscendC::DataCopyExtParams copyParams{1, 0, 0, 0, 0};
-    copyParams.blockLen = BT * BT / BIT_NUM_FOR_UINT8;
-    AscendC::DataCopyPad(maskLocalTensor, maskTensor, copyParams, {false, 0, 0, 0});
-    // DumpTensor(maskLocalTensor, 1, BT * BT / BIT_NUM_FOR_UINT8);
-    MTE2ToVSync();
+    // 在本地生成下三角因果掩码（保留下三角j<i，屏蔽上三角j>=i）
+    // mask[i,j] = 1 if j >= i, 0 if j < i
+    uint32_t numBlocksPerRow = (BT + BIT_NUM_FOR_UINT8 - 1) / BIT_NUM_FOR_UINT8;
+    for (uint32_t row = 0; row < BT; ++row) {
+        for (uint32_t block = 0; block < numBlocksPerRow; ++block) {
+            uint32_t colStart = block * BIT_NUM_FOR_UINT8;
+            uint8_t maskVal = 0;
+            // 计算这个 block 中的每个 bit
+            for (uint32_t bit = 0; bit < BIT_NUM_FOR_UINT8 && (colStart + bit) < BT; ++bit) {
+                uint32_t col = colStart + bit;
+                // 下三角 j < i -> bit = 0, 上三角 j >= i -> bit = 1
+                if (col >= row) {
+                    maskVal |= (1 << bit);
+                }
+            }
+            maskLocalTensor.SetValue(row * numBlocksPerRow + block, maskVal);
+        }
+    }
     AscendC::Duplicate<float>(zeroFp32LocalTensor, float(0.0), ONE_BLOCK_32 / SIZE_FLOAT);
 
     // 清零fp32 g tensor
