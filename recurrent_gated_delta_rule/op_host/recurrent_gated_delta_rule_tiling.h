@@ -65,7 +65,11 @@ protected:
     void InitCompileInfo();
     void PrintTilingData();
 
+<<<<<<< ours
     //Host tiling rule-chain engine: compose shape/UB steps by ordered rules.
+=======
+    // Host tiling rule-chain engine: compose shape/UB steps by ordered rules.
+>>>>>>> theirs
     using HostRuleFn = ge::graphStatus (RecurrentGatedDeltaRuleTiling::*)();
     struct UbCalcContext {
         int64_t ubSize = 0;
@@ -84,7 +88,11 @@ protected:
     ge::graphStatus GetScale();
     ge::graphStatus GetOptionalInput();
     ge::graphStatus AnalyzeFormat();
+<<<<<<< ours
     //Host tiling refactor helpers: split shape validation/fill and UB calculation.
+=======
+    //  Host tiling refactor helpers: split shape validation/fill and UB calculation.
+>>>>>>> theirs
     ge::graphStatus CheckShapeDimAndRelation(const gert::Shape &queryShape, const gert::Shape &keyShape,
                                              const gert::Shape &valueShape, const gert::Shape &betaShape,
                                              const gert::Shape &stateShape, const gert::Shape &cuSeqlensShape,
