@@ -1,11 +1,11 @@
-/**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
+﻿/**
+聽* Copyright (c) 2025 Huawei Technologies Co., Ltd.
+聽* This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+聽* Please refer to the License for details. You may not use this file except in compliance with the License.
+聽* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+聽* INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+聽* See LICENSE in the root of the software repository for the full text of the License.
+聽*/
 
 /*!
  * \file test_recurrent_gated_delta_rule.cpp
@@ -41,6 +41,7 @@ struct alignas(8) RecurrentGatedDeltaRuleTilingData {
     uint32_t vStep;
     float scale;
     uint32_t hasGama;
+    uint32_t hasGamaK;
     uint32_t hasAcceptedTokens;
 };
 
@@ -57,7 +58,7 @@ T* GmAllocWrapper(size_t size) {
 }
 
 void InitTilingData(RecurrentGatedDeltaRuleTilingData* tilingData, uint32_t b, uint32_t t, uint32_t nk, uint32_t nv,
-                    uint32_t dk, uint32_t dv, uint32_t hasGama, uint32_t hasAcceptedTokens) {
+                    uint32_t dk, uint32_t dv, uint32_t hasGama, uint32_t hasGamaK, uint32_t hasAcceptedTokens) {
     tilingData->vectorCoreNum = 8;
     tilingData->ubCalSize = 192 * 1024;
     tilingData->ubRestBytes = 96 * 1024;
@@ -71,6 +72,7 @@ void InitTilingData(RecurrentGatedDeltaRuleTilingData* tilingData, uint32_t b, u
     tilingData->vStep = 32;
     tilingData->scale = 1.0f;
     tilingData->hasGama = hasGama;
+    tilingData->hasGamaK = hasGamaK;
     tilingData->hasAcceptedTokens = hasAcceptedTokens;
 }
 
@@ -109,6 +111,7 @@ void InitInputData(uint8_t* stateGm, size_t shapeState,
 
 struct RGDRTestParams {
     uint32_t hasGama;
+    uint32_t hasGamaK;
     uint32_t hasAcceptedTokens;
 };
 
@@ -178,6 +181,7 @@ protected:
         RecurrentGatedDeltaRuleTilingData* tilingData = reinterpret_cast<RecurrentGatedDeltaRuleTilingData*>(tiling);
         InitTilingData(tilingData, b, t, nk, nv, dk, dv,
                        params.hasGama,
+                       params.hasGamaK,
                        params.hasAcceptedTokens);
     }
 
@@ -202,15 +206,16 @@ INSTANTIATE_TEST_SUITE_P(
     GeneralTests, 
     RecurrentGatedDeltaRuleTest, 
     testing::Values(
-        RGDRTestParams{1, 1},    // general_test_01: 有Gama，有AcceptedTokens
-        RGDRTestParams{0, 1},    // general_test_02: 无Gama，有AcceptedTokens
-        RGDRTestParams{1, 0}     // general_test_03: 有Gama，无AcceptedTokens
+        RGDRTestParams{1, 0, 1}, // general_test_01: has g, no gk, with AcceptedTokens
+        RGDRTestParams{0, 0, 1}, // general_test_02: no g, no gk, with AcceptedTokens
+        RGDRTestParams{1, 0, 0}  // general_test_03: has g, no gk, without AcceptedTokens
     )
 );
 
 TEST_P(RecurrentGatedDeltaRuleTest, RunTest) {
     auto params = GetParam();
     std::cout << "tets config: hasGama=" << params.hasGama 
+              << ", hasGamaK=" << params.hasGamaK
               << ", hasAcceptedTokens=" << params.hasAcceptedTokens << std::endl;
 
     uint32_t blockDim = 8;
