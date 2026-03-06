@@ -12,4 +12,6 @@ build_out/cann-*.run
 
 # bash build.sh --run_example prepare_wy_repr_bwd_da eager cust > /data/yzq/OP_LOG/DA_Example.log
 
-python /data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/test_da.py > /data/yzq/OP_LOG/DA_var.log
+python /data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/test_da.py > /data/yzq/OP_LOG/DA.log
+
+# nohup python -u /data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/test_da_all.py > /data/yzq/OP_LOG/DA_all.log 2>&1 &

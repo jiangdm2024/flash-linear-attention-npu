@@ -186,7 +186,6 @@ public:
                 uint32_t curChunkSize = eos - bos;
                 GemmCoord blockCoord{0, 0, 0};
                 GemmCoord actualBlockShape{curChunkSize, curChunkSize, static_cast<uint32_t>(params.K)};
-                // AscendC::printf("actualBlockShape.m(%d)  actualBlockShape.n(%d)\n",actualBlockShape.m(), actualBlockShape.n());
                 for (int h = 0; h < params.H; h++) {
                     // Represent the full gm
                     AscendC::GlobalTensor<ElementDw> gmDw;
@@ -223,10 +222,6 @@ public:
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
-            // AscendC::printf("###yzq CrossCoreSetFlag ### 1\n");
-            // AscendC::printf("###yzq CrossCoreSetFlag ### 2\n");
-            // AscendC::printf("###yzq CrossCoreSetFlag ### 3\n");
-            // AscendC::printf("###yzq CrossCoreSetFlag ### 4\n");
             BlockMmadDA2 blockMmadDA2(resource);
             for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
                 GetChunkOffset(params.ptrCuSeqLens, params.ptrChunkIndices, params.B, params.H, params.T,
@@ -249,7 +244,6 @@ public:
                     auto tensorDA2 = tla::MakeTensor(gmDA2, params.layoutDA2, Arch::PositionGM{});
 
                     AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
-                    // AscendC::printf("###yzq CrossCoreWaitFlag ### AIV finish\n");
                     // Make tiled views
                     auto tensorBlockDu = GetTile(tensorDu,
                                                 tla::MakeCoord(0, 0),
@@ -263,7 +257,6 @@ public:
                     // Compute block-scoped matrix multiply-add
                     blockMmadDA2(tensorBlockDu, tensorBlockVb, tensorBlockDA2, actualBlockShape);
                     AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
-                    // AscendC::printf("###yzq CrossCoreSetFlag ### AIC finish\n");
                 }
             }
         }
@@ -513,7 +506,6 @@ __aicore__ void inline PrepareWyReprBwdDAProcess<kType, betaType>::Process() {
     GM_ADDR ptrDA4 = dA;
     GM_ADDR ptrDA5 = workspace;
     GM_ADDR ptrDA6 = dA;
-    // AscendC::printf("####cube === B, T, H, K, V, BT: %ld, %ld, %ld, %ld, %ld, %ld\n", B, T, H, K, V, BT);
     typename MatmulKernel::Params param{
         dw, layoutDw,
         ptrKbg, layoutKbg,

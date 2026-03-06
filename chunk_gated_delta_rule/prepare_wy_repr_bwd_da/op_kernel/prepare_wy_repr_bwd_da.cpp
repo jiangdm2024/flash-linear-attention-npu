@@ -22,7 +22,7 @@
 
 using namespace AscendC;
 __global__ __aicore__ void prepare_wy_repr_bwd_da(GM_ADDR k, GM_ADDR v, GM_ADDR beta, GM_ADDR A, GM_ADDR dw, GM_ADDR du,
-                                                  GM_ADDR g, GM_ADDR mask, GM_ADDR cu_seqlens, GM_ADDR chunk_indices,
+                                                  GM_ADDR g, GM_ADDR cu_seqlens, GM_ADDR chunk_indices,
                                                   GM_ADDR dA, GM_ADDR workspace, GM_ADDR tiling)
 {
     AscendC::AscendCUtils::SetOverflow(1);
@@ -38,7 +38,7 @@ __global__ __aicore__ void prepare_wy_repr_bwd_da(GM_ADDR k, GM_ADDR v, GM_ADDR 
         if ASCEND_IS_AIV{
             AscendC::TPipe tPipe;
             PrepareWyReprBwdDAVectorProcess<DTYPE_K, DTYPE_BETA> prepareWyReprBwdDAVectorProcess(
-                k, v, beta, A, dw, du, g, mask, cu_seqlens, chunk_indices, dA, workspace);
+                k, v, beta, A, dw, du, g, cu_seqlens, chunk_indices, dA, workspace);
             prepareWyReprBwdDAVectorProcess.Init(tilingData, &tPipe);
             prepareWyReprBwdDAVectorProcess.Process();
         }
