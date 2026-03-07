@@ -146,11 +146,20 @@ def chunk_bwd_dv_local_variable(
             m_A = pos_mask & valid_mask  # [BT, BT]
             g_i = b_g.unsqueeze(1)  # [chunk_len, 1]
             g_j = b_g.unsqueeze(0)  # [1, chunk_len]
-            g_factor = torch.exp(g_j - g_i)  * scale  # [chunk_len, chunk_len]
+            g_factor = torch.exp(g_j - g_i)  # [chunk_len, chunk_len]
             b_A_gated = torch.zeros_like(b_A)
-            b_A_gated[:chunk_len, :chunk_len] = b_A[:chunk_len, :chunk_len] * g_factor # [BT, BT] 门控缩放后的注意力核矩阵
+            # print(f"==== g_factor.shape = {g_factor.shape} ")
+            # for i in range(g_factor.shape[0]):
+            #     row_str = ', '.join([f"{g_factor[i, j].item():.6f}" for j in range(g_factor.shape[1])])
+            #     print(row_str)
+            b_A_gated[:chunk_len, :chunk_len] = b_A[:chunk_len, :chunk_len] * g_factor * scale # [BT, BT] 门控缩放后的注意力核矩阵
+            # print(f"==== b_A.shape = {b_A.shape} ",b_A[:chunk_len, :chunk_len])
             # 应用掩码
             b_A_masked = torch.where(m_A, b_A_gated, torch.zeros_like(b_A_gated)) # 只保留掩码为 True 的位置的 b_A_gated 值，其余置 0
+            # print(f"==== b_A_masked.shape = {b_A_masked.shape} ", b_A_masked[:chunk_len, :chunk_len])
+            # for i in range(b_A_masked.shape[0]):
+            #     row_str = ', '.join([f"{b_A_masked[i, j].item():.6f}" for j in range(b_A_masked.shape[1])])
+            #     print(row_str)
             b_A_masked = b_A_masked.to(torch.float32) # [BT, BT]
             BV = 128  # 与Triton保持一致
             BV = min(BV, V)  # 确保不超过V
