@@ -23,8 +23,8 @@ constexpr int32_t BUFFER_NUM = 2;
 constexpr int32_t SIZE_FLOAT = 4;
 constexpr int32_t BLOCK_SIZE = 32;
 constexpr int32_t MASK_ALIGN_LINE = 4; // chunk_size = 64 场景下，mask一行8B，4行32B对齐
-constexpr int32_t CHUNK_SIZE_64 = 64;
-constexpr int32_t CAL_NUM_FLOAT = 64; // API一次能处理256B，能计算64个float元素
+constexpr int32_t CAL_NUM_FLOAT = 64;  // API一次能处理256B，能计算64个float元素
+constexpr int32_t MASK_LINE_SIZE = 32;
 constexpr uint64_t SYNC_AIV_AIC_FLAG_1 = 1;
 constexpr uint64_t SYNC_AIV_AIC_FLAG_2 = 2;
 constexpr uint64_t SYNC_AIC_AIV_FLAG_3 = 3;
@@ -51,8 +51,10 @@ struct IndexResult {
     int64_t curTokenId;
     int64_t chunkLen;
 
-    __aicore__ inline IndexResult() : curBatchId(0), curTokenId(0), chunkLen(0) {}
-    
+    __aicore__ inline IndexResult() : curBatchId(0), curTokenId(0), chunkLen(0)
+    {
+    }
+
     __aicore__ inline IndexResult(int64_t curBatchId_, int64_t curTokenId_, int64_t chunkLen_)
         : curBatchId(curBatchId_), curTokenId(curTokenId_), chunkLen(chunkLen_)
     {
@@ -70,7 +72,7 @@ struct FixedLengthStrategy {
         chunkLenTail = lenT - (chunkNumForT - 1) * chunkSize;
     }
 
-    __aicore__ inline void calculate(int64_t loopIdx, IndexResult& result) const
+    __aicore__ inline void calculate(int64_t loopIdx, IndexResult &result) const
     {
         int64_t curChunkId = loopIdx % chunkNumForT;
         result.curTokenId = curChunkId * chunkSize;
@@ -95,7 +97,7 @@ struct VariableLengthStrategy {
         chunkIndicesGm.SetGlobalBuffer((__gm__ int64_t *)chunkIndices_);
     }
 
-    __aicore__ inline void calculate(int64_t loopIdx, IndexResult& result) const
+    __aicore__ inline void calculate(int64_t loopIdx, IndexResult &result) const
     {
         int64_t curSeqId = chunkIndicesGm.GetValue(loopIdx * 2);
         int64_t curSeqChunkId = chunkIndicesGm.GetValue(loopIdx * 2 + 1);

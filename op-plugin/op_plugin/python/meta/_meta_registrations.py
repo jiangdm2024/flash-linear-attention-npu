@@ -493,8 +493,7 @@ def npu_chunk_fwd_o(q, k, v, h, g, cu_seqlens, chunk_indices, scale, chunk_size)
     return torch.empty(v.shape, dtype=v.dtype, device=v.device)
 
 @impl(m, "npu_chunk_bwd_dv_local")
-# pylint:disable = huawei-too-many-arguments
-def npu_chunk_bwd_dv_local(q, k, d_o, g, upper_tri_matrix, g_gamma, A, cu_seqlens, chunk_indices, scale, chunk_size):
+def npu_chunk_bwd_dv_local(q, k, d_o, g, g_gamma, A, cu_seqlens, chunk_indices, scale, chunk_size):
     return torch.empty(d_o.shape, dtype=d_o.dtype, device=d_o.device)
 
 @impl(m, "npu_prepare_wy_repr_bwd_da")

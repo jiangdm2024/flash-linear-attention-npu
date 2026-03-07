@@ -23,15 +23,13 @@ static constexpr size_t INPUT_Q_IDX = 0;
 static constexpr size_t INPUT_K_IDX = 1;
 static constexpr size_t INPUT_DO_IDX = 2;
 static constexpr size_t INPUT_G_IDX = 3;
-static constexpr size_t INPUT_TRI_MATRIX_IDX = 4;
-static constexpr size_t INPUT_SEQLENS_IDX = 7;
-static constexpr size_t INPUT_CHUNK_INDICES_IDX = 8;
+static constexpr size_t INPUT_SEQLENS_IDX = 6;
+static constexpr size_t INPUT_CHUNK_INDICES_IDX = 7;
 static constexpr size_t ATTR_SCALE_IDX = 0;
 static constexpr size_t ATTR_CHUNK_SIZE_IDX = 1;
 
 static constexpr size_t Q_K_DO_DIM_NUM = 4;
 static constexpr size_t G_DIM_NUM = 3;
-static constexpr size_t TRI_MATRIX_DIM_NUM = 2;
 static constexpr size_t SEQLENS_DIM_NUM = 1;
 
 static constexpr size_t DIM_0 = 0;
@@ -103,10 +101,6 @@ public:
                     , return ge::GRAPH_FAILED);
         OP_CHECK_IF(RequiredInputDimNumCheck(context_->GetOptionalInputShape(INPUT_G_IDX), G_DIM_NUM, INPUT_G_NAME) !=
                         ge::GRAPH_SUCCESS,
-                    , return ge::GRAPH_FAILED);
-        OP_CHECK_IF(RequiredInputDimNumCheck(context_->GetOptionalInputShape(INPUT_TRI_MATRIX_IDX),
-        TRI_MATRIX_DIM_NUM,
-                                             INPUT_TRI_MATRIX_NAME) != ge::GRAPH_SUCCESS,
                     , return ge::GRAPH_FAILED);
         return ge::GRAPH_SUCCESS;
     }
@@ -186,18 +180,15 @@ public:
 
         const gert::StorageShape *chunkIndicesShape = context_->GetOptionalInputShape(INPUT_CHUNK_INDICES_IDX);
         OP_CHECK_NULL_WITH_CONTEXT(context_, chunkIndicesShape);
-        OP_CHECK_IF(RequiredInputDimNumCheck(chunkIndicesShape, TRI_MATRIX_DIM_NUM, INPUT_CHUNK_INDICES_NAME) !=
-                        ge::GRAPH_SUCCESS,
-                    , return ge::GRAPH_FAILED);
         const gert::Shape chunkIndicesStorageShape = chunkIndicesShape->GetStorageShape();
-        int64_t chunkIndicesDim1 = chunkIndicesStorageShape.GetDim(DIM_1);
-        OP_CHECK_IF(chunkIndicesDim1 != CHUNK_INDICES_DIM_1_SIZE,
+        int64_t chunkIndicesDim0 = chunkIndicesStorageShape.GetDim(DIM_0);
+        OP_CHECK_IF(chunkIndicesDim0 % CHUNK_INDICES_DIM_1_SIZE != 0,
                     OP_LOGE(context_->GetNodeName(),
-                            "Check chunk_indices shape failed, the dim 1 of chunk_indices should be 2, but get %ld.",
-                            chunkIndicesDim1),
+                            "Check chunk_indices shape failed, the dim 0 of chunk_indices needs to be divisible by 2, but get %ld.",
+                            chunkIndicesDim0),
                     return ge::GRAPH_FAILED);
 
-        tiling_.set_chunkNumForT(static_cast<int64_t>(chunkIndicesStorageShape.GetDim(DIM_0)));
+        tiling_.set_chunkNumForT(chunkIndicesDim0 / CHUNK_INDICES_DIM_1_SIZE);
         return ge::GRAPH_SUCCESS;
     }
 };
