@@ -8,7 +8,7 @@ from golden import chunk_bwd_dv_local_fix, chunk_bwd_dv_local_variable, prepare_
 from utils import generate_cu_seqlens, compare_tensors_by_ratio, create_incremental_tensor, create_tensor, bool_matrix_to_uint8, get_tensor_md5, compare_tensors_md5
 
 def test_variable():
-    B, H, T, K, V = 1, 1, 32768, 128, 128
+    B, H, T, K, V = 1, 32, 128, 128, 128
     chunk_size= 64
     scale = 0.011
     cu_seqlens_len = 2
@@ -30,7 +30,7 @@ def test_variable():
     print(f"==== cu_seqlens.shape = {cu_seqlens.shape} ",cu_seqlens)
 
     dv_golden = chunk_bwd_dv_local_variable(q, k, d_o, g, scale, cu_seqlens, chunk_size)
-    print(f"==== dv_golden.shape = {dv_golden.shape} ")
+    # print(f"==== dv_golden.shape = {dv_golden.shape} ")
 
     q_npu = q.npu()
     k_npu = k.npu()
@@ -41,7 +41,7 @@ def test_variable():
     chunk_indices_list = chunk_indices.flatten().tolist()
 
     dv = torch_npu.npu_chunk_bwd_dv_local(q_npu, k_npu, d_o_npu, g_npu, g_gamma=None, A=None, cu_seqlens=cu_seqlens_list, chunk_indices=chunk_indices_list, scale=scale, chunk_size=chunk_size)
-    print(f"==== dv.shape = {dv.shape} ",dv)
+    # print(f"==== dv.shape = {dv.shape} ",dv)
     single(dv.cpu(),dv_golden)
     # # torch.save(dv.cpu(),"dv.pt")
     # dv_pre = torch.load("dv.pt")
@@ -90,6 +90,6 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     
     test_variable()
-    # test_fix()
+    test_fix()
 
     
