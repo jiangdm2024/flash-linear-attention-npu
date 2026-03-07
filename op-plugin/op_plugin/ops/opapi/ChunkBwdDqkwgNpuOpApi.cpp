@@ -40,11 +40,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> npu_chunk_bwd_dqkwg(
     at::Tensor dk = npu_preparation::apply_tensor_without_format(k.sizes(), k.options().dtype());
     at::Tensor dw = npu_preparation::apply_tensor_without_format(k.sizes(), k.options().dtype());
     at::Tensor dg = npu_preparation::apply_tensor_without_format(g.sizes(), g.options().dtype());
-    const at::Tensor &cu_seqlens_ = c10::value_or_else(cu_seqlens, [] { return at::Tensor(); });
-    const at::Tensor &chunk_indices_ = c10::value_or_else(chunk_indices, [] { return at::Tensor(); });
     float scale_real = static_cast<float>(scale.value_or(1.0));
     EXEC_NPU_CMD(aclnnChunkBwdDqkwg,
-        q, k, v, g, h, dox, dh, dv, cu_seqlens_, chunk_indices_, scale_real, chunk_size, dq, dk, dw, dg);
+        q, k, v, g, h, dox, dh, dv, cu_seqlens, chunk_indices, scale_real, chunk_size, dq, dk, dw, dg);
     return std::tie(dq, dk, dw, dg);
 }
 
