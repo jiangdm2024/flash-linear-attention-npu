@@ -39,7 +39,7 @@ const std::array<const aclTensor *, 4> PrepareWyReprBwdFull(
     L0_DFX(PrepareWyReprBwdFull, k, v, beta, a, dA, dw, du, g, cuSeqlensOptional, chunkIndicesOptional, chunkSize, dkOut, dvOut, dbetaOut, dgOut);
     
     const aclTensor *actualCuSeqQLen = nullptr;
-    if (!cuSeqlensOptional) {
+    if (cuSeqlensOptional) {
         actualCuSeqQLen = executor->ConvertToTensor(cuSeqlensOptional, DataType::DT_INT64);
         const_cast<aclTensor *>(actualCuSeqQLen)->SetStorageFormat(Format::FORMAT_ND);
         const_cast<aclTensor *>(actualCuSeqQLen)->SetViewFormat(Format::FORMAT_ND);
@@ -49,7 +49,7 @@ const std::array<const aclTensor *, 4> PrepareWyReprBwdFull(
     }
 
     const aclTensor *actualChunkIndices = nullptr;
-    if (!chunkIndicesOptional) {
+    if (chunkIndicesOptional) {
         actualChunkIndices = executor->ConvertToTensor(chunkIndicesOptional, DataType::DT_INT64);
         const_cast<aclTensor *>(actualChunkIndices)->SetStorageFormat(Format::FORMAT_ND);
         const_cast<aclTensor *>(actualChunkIndices)->SetViewFormat(Format::FORMAT_ND);
