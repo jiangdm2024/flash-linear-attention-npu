@@ -431,12 +431,13 @@ public:
         }
         std::vector<int64_t> expectChunkIndices;
         for(int64_t i = 1; i < seqlensDim0; i++){
-            OP_CHECK_IF(cuSeqlens[i] < cuSeqlens[i - 1],
+            int64_t curSeqLen = cuSeqlens[i] - cuSeqlens[i - 1];
+            OP_CHECK_IF(curSeqLen <= 0,
                         OP_LOGE(context_->GetNodeName(),
                                 "Check seqlens data failed, the seqlens[%ld]:[%ld] should be larger than seqlens[%ld]:[%ld]",
                                 i, cuSeqlens[i], i - 1, cuSeqlens[i - 1]),
                         return ge::GRAPH_FAILED);
-            for(int64_t j = 0;j < cuSeqlens[i]; j += chunkSize){
+            for(int64_t j = 0;j < curSeqLen; j += chunkSize){
                 expectChunkIndices.push_back(i - 1);
                 expectChunkIndices.push_back(j / chunkSize);
             }
@@ -479,7 +480,6 @@ static void PrepareWyReprBwdFullTilingDataPrint(gert::TilingContext *context, Pr
 
 ge::graphStatus Tiling4PrepareWyReprBwdFull(gert::TilingContext *context)
 {
-    std::cout << "hello wordl\n";
     OP_LOGD(context->GetNodeName(), "Tiling4PrepareWyReprBwdFull start.");
     PrepareWyReprBwdFullTilingData tiling;
     PrepareWyReprBwdFullTilingProcessor processor(context, tiling);
