@@ -91,6 +91,7 @@ struct BlockMmadAiv {
 #include "catlass/gemm/block/block_mmad_preload.hpp"
 #include "catlass/gemm/block/block_mmad_preload_async.hpp"
 #include "catlass/gemm/block/block_mmad_pingpong_tla.hpp"
+#include "catlass/gemm/block/block_mmad_pingpong_tla_multi.hpp"
 #include "catlass/gemm/block/block_mmad_preload_tla.hpp"
 #include "catlass/gemm/block/block_mmad_preload_async_with_callback.hpp"
 #include "catlass/gemm/block/block_mmad_gemm.hpp"
@@ -111,5 +112,4 @@ struct BlockMmadAiv {
 #include "catlass/gemm/block/block_mmad_dynamic_aiv.hpp"
 #include "catlass/gemm/block/block_mmad_streamk.hpp"
 #include "catlass/gemm/block/block_mmad_w4a4_per_token_per_channel_dequant.hpp"
-#include "catlass/gemm/block/block_mmad_pingpong_gdn.hpp"
 #endif // CATLASS_GEMM_BLOCK_BLOCK_MMAD_HPP

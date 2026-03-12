@@ -31,12 +31,13 @@ extern "C" __global__ __aicore__ void chunk_gated_delta_rule_fwd_h(GM_ADDR k, GM
     __gm__ ChunkGatedDeltaRuleFwdHTilingData *__restrict gdnFwdHTilingData = reinterpret_cast<__gm__ ChunkGatedDeltaRuleFwdHTilingData *__restrict>(tiling);
     if (gdnFwdHTilingData->dataType == 0) {
 
+        using ArchTag = Catlass::Arch::AtlasA2;
         using CubeScheduler = typename Catlass::Gemm::Block::BlockSchedulerGdnFwdHCube;
         using VecScheduler = typename Catlass::Gemm::Block::BlockSchedulerGdnFwdHVec;
         
-        using DispatchPolicy = Gemm::MmadAtlasA2PingpongGdn<true>;
-        using L1TileShape = GemmShape<128, 128, 128>;
-        using L0TileShape = L1TileShape;
+        using DispatchPolicyTla = Gemm::MmadPingpongTlaMulti<ArchTag, true>;
+        using L1TileShapeTla = Shape<_128, _128, _128>;
+        using L0TileShapeTla = L1TileShapeTla;
 
         using WType = Gemm::GemmType<half, layout::RowMajor>;
         using HType = Gemm::GemmType<half, layout::RowMajor>;
@@ -49,10 +50,12 @@ extern "C" __global__ __aicore__ void chunk_gated_delta_rule_fwd_h(GM_ADDR k, GM
         using HType = Gemm::GemmType<half, layout::RowMajor>;
 
         // cube 1
-        using BlockMmadWH = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, WType, HType, Vworkype>;
+        using TileCopyWH = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, half, layout::RowMajor, half, layout::RowMajor, half, layout::RowMajor>;
+        using BlockMmadWH = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, half, half, half, void, TileCopyWH>;
 
         // cube 2
-        using BlockMmadKV = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, KType, VType, HworkType>;
+        using TileCopyKV = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, half, layout::ColumnMajor, half, layout::RowMajor, half, layout::RowMajor>;
+        using BlockMmadKV = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, half, half, half, void, TileCopyKV>;
 
         // vec 1
         using DispatchPolicyGDNFwdHVnew = Epilogue::EpilogueAtlasA2GDNFwdHVnew;
@@ -70,12 +73,13 @@ extern "C" __global__ __aicore__ void chunk_gated_delta_rule_fwd_h(GM_ADDR k, GM
 
     } else {
         
+        using ArchTag = Catlass::Arch::AtlasA2;
         using CubeScheduler = typename Catlass::Gemm::Block::BlockSchedulerGdnFwdHCube;
         using VecScheduler = typename Catlass::Gemm::Block::BlockSchedulerGdnFwdHVec;
         
-        using DispatchPolicy = Gemm::MmadAtlasA2PingpongGdn<true>;
-        using L1TileShape = GemmShape<128, 128, 128>;
-        using L0TileShape = L1TileShape;
+        using DispatchPolicyTla = Gemm::MmadPingpongTlaMulti<ArchTag, true>;
+        using L1TileShapeTla = Shape<_128, _128, _128>;
+        using L0TileShapeTla = L1TileShapeTla;
 
         using WType = Gemm::GemmType<bfloat16_t, layout::RowMajor>;
         using HType = Gemm::GemmType<bfloat16_t, layout::RowMajor>;
@@ -88,10 +92,12 @@ extern "C" __global__ __aicore__ void chunk_gated_delta_rule_fwd_h(GM_ADDR k, GM
         using HType = Gemm::GemmType<bfloat16_t, layout::RowMajor>;
 
         // cube 1
-        using BlockMmadWH = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, WType, HType, Vworkype>;
+        using TileCopyWH = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, bfloat16_t, layout::RowMajor, bfloat16_t, layout::RowMajor, half, layout::RowMajor>;
+        using BlockMmadWH = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, bfloat16_t, bfloat16_t, half, void, TileCopyWH>;
 
         // cube 2
-        using BlockMmadKV = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, KType, VType, HworkType>;
+        using TileCopyKV = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, bfloat16_t, layout::ColumnMajor, bfloat16_t, layout::RowMajor, half, layout::RowMajor>;
+        using BlockMmadKV = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, bfloat16_t, bfloat16_t, half, void, TileCopyKV>;
 
         // vec 1
         using DispatchPolicyGDNFwdHVnew = Epilogue::EpilogueAtlasA2GDNFwdHVnew;

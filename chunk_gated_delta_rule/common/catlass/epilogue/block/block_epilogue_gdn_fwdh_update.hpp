@@ -178,6 +178,9 @@ public:
         AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID1);
         AscendC::Add<half>(hOutputUbHalfTensor, hUbHalfTensor, hUpdateUbHalfTensor, mActualThisSubBlock * nActual);
 
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0);
+
         if constexpr(!std::is_same<HElementOutput, half>::value) {
             AscendC::PipeBarrier<PIPE_V>();
             AscendC::Cast(floatUbTensor, hOutputUbHalfTensor, AscendC::RoundMode::CAST_NONE, mActualThisSubBlock * nActual);

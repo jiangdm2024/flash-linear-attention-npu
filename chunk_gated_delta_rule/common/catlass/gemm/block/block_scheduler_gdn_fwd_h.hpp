@@ -45,6 +45,7 @@ struct GDNFwdHOffsets {
     uint32_t vWorkOffset;
     bool isFinalState;
     uint32_t blockTokens;
+    bool isDummyHead;
     // for debug
     uint32_t batchIdx;
     uint32_t headIdx;
@@ -66,6 +67,7 @@ struct BlockSchedulerGdnFwdH {
     uint32_t tokenBatch;
 
     uint32_t taskIdx;
+    uint32_t taskLoops;
     uint32_t cubeCoreIdx;
     uint32_t cubeCoreNum;
     uint32_t vLoops;
@@ -73,7 +75,9 @@ struct BlockSchedulerGdnFwdH {
     uint32_t headGroups;
     uint32_t totalChunks;
     uint32_t totalTokens;
+    uint32_t headInnerLoop;
 
+    bool hasDummyHead;
     bool isRunning;
     bool processNewTask {true};
     bool firstLoop {true};
@@ -130,7 +134,10 @@ struct BlockSchedulerGdnFwdH {
         vLoops = vHeadDim / vBlockSize;
         taskNum = vLoops * batch * vNumHead;
         headGroups = vNumHead / kNumHead;
-        taskIdx = cubeCoreIdx * PING_PONG_STAGES;
+        hasDummyHead = taskNum % (PING_PONG_STAGES * cubeCoreNum) <= cubeCoreNum;
+        taskLoops = (taskNum + cubeCoreNum * PING_PONG_STAGES - 1) / (cubeCoreNum * PING_PONG_STAGES);
+        headInnerLoop = taskNum > cubeCoreNum ? PING_PONG_STAGES : 1;
+        taskIdx = cubeCoreIdx * headInnerLoop;
         isRunning = taskIdx < taskNum;
 
         if (isVariedLen) {
@@ -178,13 +185,16 @@ struct BlockSchedulerGdnFwdH {
         offsets[currStage].vWorkOffset = (cubeCoreIdx * PING_PONG_STAGES + currStage) * chunkSize * vHeadDim;
         offsets[currStage].isFinalState = chunkIdx == (batchChunks - 1); 
         offsets[currStage].blockTokens = offsets[currStage].isFinalState ? (batchTokens - chunkIdx * chunkSize) : chunkSize;
+        offsets[currStage].isDummyHead = headInnerLoop < PING_PONG_STAGES && headInnerIdx >= headInnerLoop; 
         offsets[currStage].batchIdx = batchIdx; 
         offsets[currStage].headIdx = vHeadIdx; 
         offsets[currStage].chunkIdx = chunkIdx; 
 
         processNewTask = chunkIdx == batchChunks - 1 && headInnerIdx == PING_PONG_STAGES - 1;
-        if (unlikely(processNewTask)){
-            taskIdx += PING_PONG_STAGES * cubeCoreNum;
+        if (unlikely(processNewTask)) {
+            uint32_t currLoopIdx = taskIdx / (PING_PONG_STAGES * cubeCoreNum);
+            headInnerLoop = ((currLoopIdx + 2 == taskLoops) && hasDummyHead) ? 1 : PING_PONG_STAGES;
+            taskIdx = (currLoopIdx + 1) * PING_PONG_STAGES * cubeCoreNum + headInnerLoop * cubeCoreIdx;
             if (unlikely(taskIdx >= taskNum)) {
                 isRunning = false;
             }

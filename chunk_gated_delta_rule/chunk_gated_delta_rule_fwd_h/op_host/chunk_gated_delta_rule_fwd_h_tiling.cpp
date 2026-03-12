@@ -63,7 +63,6 @@ ge::graphStatus Tiling4ChunkGatedDeltaRuleFwdH(gert::TilingContext *context)
     
     gert::Shape kStorageShape = context->GetOptionalInputShape(INPUT_K_IDX)->GetStorageShape();
     gert::Shape uStorageShape = context->GetOptionalInputShape(INPUT_U_IDX)->GetStorageShape();
-    gert::Shape cuSeqlenStorageShape = context->GetOptionalInputShape(INPUT_SEQLENS_IDX)->GetStorageShape();
 
     int64_t seqlen = kStorageShape.GetDim(DIM_SEQLEN);
     int64_t kNumHead = kStorageShape.GetDim(DIM_HEAD_NUM);
@@ -81,7 +80,7 @@ ge::graphStatus Tiling4ChunkGatedDeltaRuleFwdH(gert::TilingContext *context)
     } else {
         isVariedLen = true;
         shapeBatch = 1;
-        tokenBatch = cuSeqlenStorageShape.GetDim(DIM_BATCH) - 1;
+        tokenBatch = cuSeqlensTensor->GetStorageShape().GetDim(DIM_BATCH) - 1;
         batch = tokenBatch;
     }
     

@@ -19,13 +19,12 @@
 #include "tiling_base/tiling_templates_registry.h"
 
 namespace optiling {
-
 static constexpr size_t INPUT_Q_IDX = 0;
 static constexpr size_t INPUT_K_IDX = 1;
 static constexpr size_t INPUT_V_IDX = 2;
 static constexpr size_t INPUT_H_IDX = 3;
 static constexpr size_t INPUT_G_IDX = 4;
-static constexpr size_t INPUT_SEQLENS_IDX = 5; // cu_seqlens
+static constexpr size_t INPUT_SEQLENS_IDX = 5;
 static constexpr size_t INPUT_CHUNK_INDICES_IDX = 6;
 
 static constexpr size_t ATTR_SCALE_IDX = 0;
@@ -36,39 +35,39 @@ static constexpr size_t DIM_HEAD_NUM = 1;
 static constexpr size_t DIM_SEQLEN = 2;
 static constexpr size_t DIM_HEAD_DIM = 3;
 
+
 static void ChunkFwdOTilingDataPrint(gert::TilingContext *context, ChunkFwdOTilingData &tiling)
 {
     auto nodeName = context->GetNodeName();
-    OP_LOGD(nodeName, "Start ChunkFwdO Tiling Data Print");
-    OP_LOGD(nodeName, "batch: %ld", tiling.get_shapeBatch());
-    OP_LOGD(nodeName, "seqlen: %ld", tiling.get_seqlen());
-    OP_LOGD(nodeName, "kNumHead: %ld", tiling.get_kNumHead());
-    OP_LOGD(nodeName, "vNumHead: %ld", tiling.get_vNumHead());
-    OP_LOGD(nodeName, "kHeadDim: %ld", tiling.get_kHeadDim());
-    OP_LOGD(nodeName, "vHeadDim: %ld", tiling.get_vHeadDim());
-    OP_LOGD(nodeName, "chunkSize: %ld", tiling.get_chunkSize());
-    OP_LOGD(nodeName, "dataType: %ld", tiling.get_dataType());
-    OP_LOGD(nodeName, "isVariedLen: %ld", tiling.get_isVariedLen());
-    OP_LOGD(nodeName, "tokenBatch: %ld", tiling.get_tokenBatch());
-    OP_LOGD(nodeName, "End ChunkFwdO Tiling Data Print");
+    OP_LOGD(nodeName, ">>>>>>>>>>>>>>> Start to print ChunkFwdO tiling data <<<<<<<<<<<<<<<<");
+    OP_LOGD(nodeName, "=== batch: %ld", tiling.get_shapeBatch());
+    OP_LOGD(nodeName, "=== seqlen: %ld", tiling.get_seqlen());
+    OP_LOGD(nodeName, "=== kNumHead: %ld", tiling.get_kNumHead());
+    OP_LOGD(nodeName, "=== vNumHead: %ld", tiling.get_vNumHead());
+    OP_LOGD(nodeName, "=== kHeadDim: %ld", tiling.get_kHeadDim());
+    OP_LOGD(nodeName, "=== vHeadDim: %ld", tiling.get_vHeadDim());
+    OP_LOGD(nodeName, "=== chunkSize: %ld", tiling.get_chunkSize());
+    OP_LOGD(nodeName, "=== dataType: %ld", tiling.get_dataType());
+    OP_LOGD(nodeName, "=== isVariedLen: %ld", tiling.get_isVariedLen());
+    OP_LOGD(nodeName, "=== tokenBatch: %f", tiling.get_tokenBatch());
+    OP_LOGD(nodeName, ">>>>>>>>>>>>>>> Print ChunkFwdO tiling data end <<<<<<<<<<<<<<<<");
 }
 
 ge::graphStatus Tiling4ChunkFwdO(gert::TilingContext *context)
 {
-    OP_LOGD(context->GetNodeName(), "ChunkFwdO Tiling Enter");
+    OP_LOGD(context->GetNodeName(), "Tiling4ChunkFwdO start.");
     ChunkFwdOTilingData tiling;
+    
     gert::Shape qStorageShape = context->GetOptionalInputShape(INPUT_Q_IDX)->GetStorageShape();
     gert::Shape vStorageShape = context->GetOptionalInputShape(INPUT_V_IDX)->GetStorageShape();
-    gert::Shape cuSeqlenStorageShape = context->GetOptionalInputShape(INPUT_SEQLENS_IDX)->GetStorageShape();
 
     int64_t seqlen = qStorageShape.GetDim(DIM_SEQLEN);
     int64_t kNumHead = qStorageShape.GetDim(DIM_HEAD_NUM);
     int64_t vNumHead = vStorageShape.GetDim(DIM_HEAD_NUM);
     int64_t kHeadDim = qStorageShape.GetDim(DIM_HEAD_DIM);
     int64_t vHeadDim = vStorageShape.GetDim(DIM_HEAD_DIM);
-
     int64_t isVariedLen, shapeBatch, tokenBatch;
-
+    
     auto cuSeqlensTensor = context->GetOptionalInputTensor(INPUT_SEQLENS_IDX);
     if (cuSeqlensTensor == nullptr) {
         isVariedLen = false;
@@ -77,9 +76,9 @@ ge::graphStatus Tiling4ChunkFwdO(gert::TilingContext *context)
     } else {
         isVariedLen = true;
         shapeBatch = 1;
-        tokenBatch = cuSeqlenStorageShape.GetDim(DIM_BATCH) - 1;
+        tokenBatch = cuSeqlensTensor->GetStorageShape().GetDim(DIM_BATCH) - 1;
     }
-
+    
     auto attrPtr = context->GetAttrs();
     float scale = *(attrPtr->GetAttrPointer<float>(ATTR_SCALE_IDX));
     int64_t chunkSize = *(attrPtr->GetAttrPointer<int64_t>(ATTR_CHUNK_SIZE_IDX));
@@ -94,19 +93,26 @@ ge::graphStatus Tiling4ChunkFwdO(gert::TilingContext *context)
     constexpr size_t WORKSPACE_RSV_BYTE = 16 * 1024 * 1024;
     constexpr size_t GM_ALIGN = 512;
     constexpr size_t BYTE_SIZE_16_BIT = 2;
-    int64_t pingpongStages = 1;
+    int64_t pingpongStages = 2;
 
     size_t workspaceOffset = ascendcPlatform.GetLibApiWorkSpaceSize();
     workspaceOffset += WORKSPACE_RSV_BYTE;
-
+    
     tiling.set_vWorkspaceOffset(workspaceOffset);
     workspaceOffset += (aicCoreNum * chunkSize * vHeadDim * BYTE_SIZE_16_BIT * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
+
     tiling.set_hWorkspaceOffset(workspaceOffset);
     workspaceOffset += (aicCoreNum * chunkSize * vHeadDim * BYTE_SIZE_16_BIT * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
+
     tiling.set_attnWorkspaceOffset(workspaceOffset);
     workspaceOffset += (aicCoreNum * chunkSize * chunkSize * BYTE_SIZE_16_BIT * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
+
     tiling.set_aftermaskWorkspaceOffset(workspaceOffset);
     workspaceOffset += (aicCoreNum * chunkSize * chunkSize * BYTE_SIZE_16_BIT * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
+
+    tiling.set_maskWorkspaceOffset(workspaceOffset);
+    workspaceOffset += (chunkSize * chunkSize + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
+
     workspaceOffset += WORKSPACE_RSV_BYTE;
     size_t *currentWorkspace = context->GetWorkspaceSizes(1);
     currentWorkspace[0] = (workspaceOffset - 0);
@@ -127,9 +133,7 @@ ge::graphStatus Tiling4ChunkFwdO(gert::TilingContext *context)
     context->GetRawTilingData()->SetDataSize(tiling.GetDataSize());
 
     ChunkFwdOTilingDataPrint(context, tiling);
-    
-    OP_LOGD(context->GetNodeName(), "ChunkFwdO Tiling Exit");
-    
+    OP_LOGD(context->GetNodeName(), "Tiling4ChunkFwdO end.");
     return ge::GRAPH_SUCCESS;
 }
 

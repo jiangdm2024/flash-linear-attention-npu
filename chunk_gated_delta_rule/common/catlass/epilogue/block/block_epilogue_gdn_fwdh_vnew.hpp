@@ -228,6 +228,8 @@ public:
         AscendC::LocalTensor<VElementOutput> vNewDecayUbTensor = pingpongFlag == 0 ? vNewDecayUbTensor_ping : vNewDecayUbTensor_pong;
         AscendC::LocalTensor<half> vNewDecayUbHalfTensor = pingpongFlag == 0 ? vNewDecayUbHalfTensor_ping : vNewDecayUbHalfTensor_pong;
 
+        AscendC::DataCopyParams gUbParams{1, (uint16_t)(mActual * sizeof(float)), 0, 0};
+        AscendC::DataCopyPadParams gUbPadParams{false, 0, 0, 0};
 
         AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID0 + pingpongFlag);
         AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID1 + pingpongFlag);
@@ -237,25 +239,27 @@ public:
 //        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0);
 
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID2 + pingpongFlag);
-        AscendC::DataCopy(gUbTensor, gInputThisSubBlock, (mActual + 8 - 1) / 8 * 8);
+        AscendC::DataCopyPad(gUbTensor, gInputThisSubBlock, gUbParams, gUbPadParams);
         AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID2 + pingpongFlag);
         AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID2 + pingpongFlag);
 
-        AscendC::Cast(gUbHalfTensor, gUbTensor, AscendC::RoundMode::CAST_NONE, mActual);
+        // AscendC::Cast(gUbHalfTensor, gUbTensor, AscendC::RoundMode::CAST_NONE, mActual);
 
         AscendC::SetFlag<AscendC::HardEvent::V_S>(EVENT_ID2 + pingpongFlag);
         AscendC::WaitFlag<AscendC::HardEvent::V_S>(EVENT_ID2 + pingpongFlag);
-        half inputVal = gUbHalfTensor.GetValue(mActual-1);
+        float inputVal = gUbTensor.GetValue(mActual-1);
         AscendC::SetFlag<AscendC::HardEvent::S_V>(EVENT_ID2 + pingpongFlag);
         AscendC::WaitFlag<AscendC::HardEvent::S_V>(EVENT_ID2 + pingpongFlag);
 
-        AscendC::Duplicate<half>(halfUbTensor, inputVal, mActual);
+        AscendC::Duplicate<float>(floatUbTensor, inputVal, mActual);
         AscendC::PipeBarrier<PIPE_V>();
 
-        AscendC::Sub<half>(gUbHalfTensor, halfUbTensor, gUbHalfTensor, mActual);
+        AscendC::Sub<float>(gUbTensor, floatUbTensor, gUbTensor, mActual);
         AscendC::PipeBarrier<PIPE_V>();
 
-        AscendC::Exp(gUbHalfTensor, gUbHalfTensor, mActual);
+        AscendC::Exp(gUbTensor, gUbTensor, mActual);
+        AscendC::PipeBarrier<PIPE_V>();
+        AscendC::Cast(gUbHalfTensor, gUbTensor, AscendC::RoundMode::CAST_NONE, mActual);
         AscendC::PipeBarrier<PIPE_V>();
 
         uint32_t dstShape_[2] = {gbrcReptime*8, nvActual};
@@ -284,6 +288,9 @@ public:
         AscendC::DataCopy(wsUbTensor, wsInputThisSubBlock, mActualThisSubBlock * nvActual);
         AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID1 + pingpongFlag);
         AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID1 + pingpongFlag);
+
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0 + pingpongFlag);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0 + pingpongFlag);
 
         if constexpr(!std::is_same<VElementOutput, half>::value) {
             AscendC::Sub<half>(uUbHalfTensor, uUbHalfTensor, wsUbTensor, mActualThisSubBlock * nvActual);
