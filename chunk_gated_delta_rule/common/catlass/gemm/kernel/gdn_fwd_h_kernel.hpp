@@ -12,6 +12,9 @@
 #include "catlass/gemm/gemm_type.hpp"
 #include "catlass/layout/layout.hpp"
 #include "catlass/gemm_coord.hpp"
+#include "tla/tensor.hpp"
+#include "tla/layout.hpp"
+#include "tla/tensor.hpp"
 
 #include "kernel_operator.h"
 using namespace Catlass;
@@ -44,10 +47,10 @@ public:
 
     using L1TileShape = typename BlockMmadWH::L1TileShape;
     
-    using LayoutW = typename BlockMmadWH::LayoutA;
-    using LayoutH = typename BlockMmadWH::LayoutB;
-    using LayoutV = typename BlockMmadWH::LayoutC;
-    using LayoutK = typename BlockMmadKV::LayoutA;
+    using LayoutW = Catlass::layout::RowMajor;
+    using LayoutH = Catlass::layout::RowMajor;
+    using LayoutV = Catlass::layout::RowMajor;
+    using LayoutK = Catlass::layout::ColumnMajor;
 
     
     uint32_t batch;
@@ -137,13 +140,13 @@ public:
             BlockMmadWH blockMmadWH(resource);
             BlockMmadKV blockMmadKV(resource);
 
-            LayoutW wLayout {shapeBatch * kNumHead * cubeBlockScheduler.totalTokens, kHeadDim};  
-            LayoutH hLayout {shapeBatch * vNumHead * cubeBlockScheduler.totalChunks * kHeadDim, vHeadDim};
-            LayoutV vLayout {coreNum * chunkSize * PING_PONG_STAGES, vHeadDim}; 
+            auto wLayout = tla::MakeLayout<ElementW, LayoutW>(shapeBatch * kNumHead * cubeBlockScheduler.totalTokens, kHeadDim);
+            auto hLayout = tla::MakeLayout<ElementH, LayoutH>(shapeBatch * vNumHead * cubeBlockScheduler.totalChunks * kHeadDim, vHeadDim);
+            auto vLayout = tla::MakeLayout<ElementVWork, LayoutV>(coreNum * chunkSize * PING_PONG_STAGES, vHeadDim);
             
-            LayoutK kLayout {kHeadDim, shapeBatch * kNumHead * cubeBlockScheduler.totalTokens}; 
-            LayoutV vworkLayout {coreNum * chunkSize * PING_PONG_STAGES, vHeadDim}; 
-            LayoutH hworkLayout {coreNum * kHeadDim * PING_PONG_STAGES, vHeadDim};
+            auto kLayout = tla::MakeLayout<ElementK, LayoutK>(kHeadDim, shapeBatch * kNumHead * cubeBlockScheduler.totalTokens);
+            auto vworkLayout = tla::MakeLayout<ElementVWork, LayoutV>(coreNum * chunkSize * PING_PONG_STAGES, vHeadDim);
+            auto hworkLayout = tla::MakeLayout<ElementHWork, LayoutH>(coreNum * kHeadDim * PING_PONG_STAGES, vHeadDim);
 
             bool needRun = false;
 
@@ -160,14 +163,15 @@ public:
                     int64_t cube1OffsetW = cube1Offsets.wOffset;
                     int64_t cube1OffsetH = cube1Offsets.hSrcOffset;
                     int64_t cube1OffsetVwork = cube1Offsets.vWorkOffset;
-                    GemmCoord cube1Shape{cube1Offsets.blockTokens, vHeadDim, kHeadDim};
+                    auto tensorW = tla::MakeTensor(gmW[cube1OffsetW], wLayout, Catlass::Arch::PositionGM{});
+                    auto tensorH = tla::MakeTensor(gmH[cube1OffsetH], hLayout, Catlass::Arch::PositionGM{});
+                    auto tensorV = tla::MakeTensor(gmVWorkspaceHalf[cube1OffsetVwork], vLayout, Catlass::Arch::PositionGM{});
+                    GemmCoord cube1Shape {cube1Offsets.blockTokens, vHeadDim, kHeadDim};
+                    auto tensorBlockW = GetTile(tensorW, tla::MakeCoord(0, 0), tla::MakeShape(cube1Shape.m(), cube1Shape.k()));
+                    auto tensorBlockH = GetTile(tensorH, tla::MakeCoord(0, 0), tla::MakeShape(cube1Shape.k(), cube1Shape.n()));
+                    auto tensorBlockV = GetTile(tensorV, tla::MakeCoord(0, 0), tla::MakeShape(cube1Shape.m(), cube1Shape.n()));
                     blockMmadWH.preSetFlags();
-                    blockMmadWH(
-                        gmW[cube1OffsetW], wLayout,
-                        gmH[cube1OffsetH], hLayout,
-                        gmVWorkspaceHalf[cube1OffsetVwork], vLayout,
-                        cube1Shape
-                    );
+                    blockMmadWH(tensorBlockW, tensorBlockH, tensorBlockV, cube1Shape);
                     blockMmadWH.finalWaitFlags();
                 }
                 Arch::CrossCoreSetFlag<0x2, PIPE_FIX>(cubeBlockScheduler.cube1Done);
@@ -180,14 +184,15 @@ public:
                         int64_t cube2OffsetK = cube2Offsets.wkOffset;
                         int64_t cube2OffsetVwork = cube2Offsets.vWorkOffset;
                         int64_t cube2OffsetH = cube2Offsets.hWorkOffset;
+                        auto tensorK = tla::MakeTensor(gmK[cube2OffsetK], kLayout, Catlass::Arch::PositionGM{});
+                        auto tensorVwork = tla::MakeTensor(gmVWorkspace[cube2OffsetVwork], vworkLayout, Catlass::Arch::PositionGM{});
+                        auto tensorHwork = tla::MakeTensor(gmHWorkspaceHalf[cube2OffsetH], hworkLayout, Catlass::Arch::PositionGM{});
                         GemmCoord cube2Shape{kHeadDim, vHeadDim, cube2Offsets.blockTokens};
+                        auto tensorBlockK = GetTile(tensorK, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.m(), cube2Shape.k()));
+                        auto tensorBlockVwork = GetTile(tensorVwork, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.k(), cube2Shape.n()));
+                        auto tensorBlockHwork = GetTile(tensorHwork, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.m(), cube2Shape.n()));
                         blockMmadKV.preSetFlags();
-                        blockMmadKV(
-                            gmK[cube2OffsetK], kLayout,
-                            gmVWorkspace[cube2OffsetVwork],  vworkLayout,
-                            gmHWorkspaceHalf[cube2OffsetH],  hLayout,
-                            cube2Shape
-                        );
+                        blockMmadKV(tensorBlockK, tensorBlockVwork, tensorBlockHwork, cube2Shape);
                         blockMmadKV.finalWaitFlags();
                     }
                     Arch::CrossCoreSetFlag<0x2, PIPE_FIX>(cubeBlockScheduler.cube2Done);

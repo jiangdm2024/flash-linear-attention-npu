@@ -264,8 +264,8 @@ struct MmadPingpong : public MmadBase<ArchTag_, false> {
     static constexpr bool ENABLE_UNIT_FLAG = ENABLE_UNIT_FLAG_;
 };
 
-template <bool ENABLE_UNIT_FLAG_ = false>
-struct MmadAtlasA2PingpongGdn : public MmadAtlasA2  {
+template <class ArchTag_, bool ENABLE_UNIT_FLAG_ = false>
+struct MmadPingpongTlaMulti : public MmadBase<ArchTag_, false> {
     static constexpr uint32_t STAGES = 2;
     static constexpr bool ENABLE_UNIT_FLAG = ENABLE_UNIT_FLAG_;
 };

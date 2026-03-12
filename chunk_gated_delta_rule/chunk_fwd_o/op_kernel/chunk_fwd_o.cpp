@@ -30,12 +30,13 @@ extern "C" __global__ __aicore__ void chunk_fwd_o(GM_ADDR q, GM_ADDR k, GM_ADDR 
     __gm__ ChunkFwdOTilingData *__restrict gdnFwdOTilingData = reinterpret_cast<__gm__ ChunkFwdOTilingData *__restrict>(tiling);
     if (gdnFwdOTilingData->dataType == 0) {
  
+        using ArchTag = Catlass::Arch::AtlasA2;
         using CubeScheduler = typename Catlass::Gemm::Block::BlockSchedulerGdnFwdOCube;
         using VecScheduler = typename Catlass::Gemm::Block::BlockSchedulerGdnFwdOVec;
         
-        using L1TileShape = GemmShape<128, 128, 128>;
-        using L0TileShape = L1TileShape;
-        using DispatchPolicy = Gemm::MmadAtlasA2PingpongGdn<true>;
+        using DispatchPolicyTla = Gemm::MmadPingpongTlaMulti<ArchTag, true>;
+        using L1TileShapeTla = Shape<_128, _128, _128>;
+        using L0TileShapeTla = L1TileShapeTla;
         using QType = Gemm::GemmType<half, layout::RowMajor>;
         using KType = Gemm::GemmType<half, layout::ColumnMajor>;
         using AttenType = Gemm::GemmType<half, layout::RowMajor>;
@@ -49,13 +50,16 @@ extern "C" __global__ __aicore__ void chunk_fwd_o(GM_ADDR q, GM_ADDR k, GM_ADDR 
         using MaskType = Gemm::GemmType<bool, layout::RowMajor>;
 
         // cube 1
-        using BlockMmadQK = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, QType, KType, AttenType>;
+        using TileCopyQK = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, half, layout::RowMajor, half, layout::ColumnMajor, half, layout::RowMajor>;
+        using BlockMmadQK = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, half, half, half, void, TileCopyQK>;
 
         // cube 2
-        using BlockMmadQH = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, QType, HType, OinterType>;
+        using TileCopyQH = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, half, layout::RowMajor, half, layout::RowMajor, half, layout::RowMajor>;
+        using BlockMmadQH = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, half, half, half, void, TileCopyQH>;
 
         // cube 3
-        using BlockMmadAttenVNEW = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AttenMaskedType, VNEWType, OinterType>;
+        using TileCopyAttenVNEW = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, half, layout::RowMajor, half, layout::RowMajor, half, layout::RowMajor>;
+        using BlockMmadAttenVNEW = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, half, half, half, void, TileCopyAttenVNEW>;
 
         // vec 1
         using DispatchPolicyGDNFwdOQkmask = Epilogue::EpilogueAtlasA2GDNFwdOQkmask;
@@ -73,12 +77,13 @@ extern "C" __global__ __aicore__ void chunk_fwd_o(GM_ADDR q, GM_ADDR k, GM_ADDR 
 
     } else {
 
+        using ArchTag = Catlass::Arch::AtlasA2;
         using CubeScheduler = typename Catlass::Gemm::Block::BlockSchedulerGdnFwdOCube;
         using VecScheduler = typename Catlass::Gemm::Block::BlockSchedulerGdnFwdOVec;
         
-        using L1TileShape = GemmShape<128, 128, 128>;
-        using L0TileShape = L1TileShape;
-        using DispatchPolicy = Gemm::MmadAtlasA2PingpongGdn<true>;
+        using DispatchPolicyTla = Gemm::MmadPingpongTlaMulti<ArchTag, true>;
+        using L1TileShapeTla = Shape<_128, _128, _128>;
+        using L0TileShapeTla = L1TileShapeTla;
         using QType = Gemm::GemmType<bfloat16_t, layout::RowMajor>;
         using KType = Gemm::GemmType<bfloat16_t, layout::ColumnMajor>;
         using AttenType = Gemm::GemmType<half, layout::RowMajor>;
@@ -92,13 +97,16 @@ extern "C" __global__ __aicore__ void chunk_fwd_o(GM_ADDR q, GM_ADDR k, GM_ADDR 
         using MaskType = Gemm::GemmType<bool, layout::RowMajor>;
 
         // cube 1
-        using BlockMmadQK = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, QType, KType, AttenType>;
+        using TileCopyQK = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, bfloat16_t, layout::RowMajor, bfloat16_t, layout::ColumnMajor, half, layout::RowMajor>;
+        using BlockMmadQK = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, bfloat16_t, bfloat16_t, half, void, TileCopyQK>;
 
         // cube 2
-        using BlockMmadQH = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, QType, HType, OinterType>;
+        using TileCopyQH = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, bfloat16_t, layout::RowMajor, bfloat16_t, layout::RowMajor, half, layout::RowMajor>;
+        using BlockMmadQH = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, bfloat16_t, bfloat16_t, half, void, TileCopyQH>;
 
         // cube 3
-        using BlockMmadAttenVNEW = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AttenMaskedType, VNEWType, OinterType>;
+        using TileCopyAttenVNEW = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, bfloat16_t, layout::RowMajor, bfloat16_t, layout::RowMajor, half, layout::RowMajor>;
+        using BlockMmadAttenVNEW = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, bfloat16_t, bfloat16_t, half, void, TileCopyAttenVNEW>;
 
         // vec 1
         using DispatchPolicyGDNFwdOQkmask = Epilogue::EpilogueAtlasA2GDNFwdOQkmask;

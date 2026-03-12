@@ -22,6 +22,9 @@
 #include "catlass/gemm/gemm_type.hpp"
 #include "catlass/layout/layout.hpp"
 #include "catlass/gemm_coord.hpp"
+#include "tla/tensor.hpp"
+#include "tla/layout.hpp"
+#include "tla/tensor.hpp"
 
 #include "kernel_operator.h"
 using namespace Catlass;
@@ -45,26 +48,26 @@ public:
     using GDNFwdOOffsets = Catlass::Gemm::Block::GDNFwdOOffsets;
 
     using ElementQ = typename BlockMmadQK::ElementA;
-    using LayoutQ = typename BlockMmadQK::LayoutA;
+    using LayoutQ = Catlass::layout::RowMajor;
 
     using ElementK =  typename BlockMmadQK::ElementB;
-    using LayoutK = typename BlockMmadQK::LayoutB;
+    using LayoutK = Catlass::layout::ColumnMajor;
 
     using ElementAtten = typename BlockMmadQK::ElementC;
-    using LayoutAtten = typename BlockMmadQK::LayoutC;
+    using LayoutAtten = Catlass::layout::RowMajor;
     
     using ElementAttenMasked = typename BlockMmadQH::ElementA;
-    using LayoutAttenMasked = typename BlockMmadQH::LayoutA;
+    using LayoutAttenMasked = Catlass::layout::RowMajor;
 
     using ElementH = typename BlockMmadQH::ElementB;
-    using LayoutH = typename BlockMmadQH::LayoutB;
+    using LayoutH = Catlass::layout::RowMajor;
 
     using ElementOinter = typename BlockMmadQH::ElementC;
-    using LayoutOinter = typename BlockMmadQH::LayoutC;
+    using LayoutOinter = Catlass::layout::RowMajor;
 
 
     using ElementVNEW = typename BlockMmadAttenVNEW::ElementB; 
-    using LayoutVNEW = typename BlockMmadAttenVNEW::LayoutB;
+    using LayoutVNEW = Catlass::layout::RowMajor;
 
 
     using ElementA = half;
@@ -160,11 +163,11 @@ public:
             BlockMmadQH blockMmadQH(resource);
             BlockMmadAttenVNEW blockMmadAttenVNEW(resource);
 
-            LayoutQ qLayout{shapeBatch * kNumHead * seqlen, kHeadDim};  
-            LayoutK  kLayout{kHeadDim, shapeBatch * kNumHead * seqlen};
-            LayoutH  hLayout{shapeBatch * vNumHead * seqlen * kHeadDim, vHeadDim};
-            LayoutOinter ointerLayout{coreNum * chunkSize * PING_PONG_STAGES, vHeadDim};
-            LayoutVNEW  vnewLayout{shapeBatch * vNumHead * seqlen, vHeadDim};
+            auto qLayout = tla::MakeLayout<ElementQ, LayoutQ>(shapeBatch * kNumHead * seqlen, kHeadDim);
+            auto kLayout = tla::MakeLayout<ElementK, LayoutK>(kHeadDim, shapeBatch * kNumHead * seqlen);
+            auto hLayout = tla::MakeLayout<ElementH, LayoutH>(shapeBatch * vNumHead * seqlen * kHeadDim, vHeadDim);
+            auto ointerLayout = tla::MakeLayout<ElementOinter, LayoutOinter>(coreNum * chunkSize * PING_PONG_STAGES, vHeadDim);
+            auto vnewLayout = tla::MakeLayout<ElementVNEW, LayoutVNEW>(shapeBatch * vNumHead * seqlen, vHeadDim);
 
             bool needRun = false;
             bool isFirstC3 = true;
@@ -180,13 +183,16 @@ public:
                     int64_t cube1OffsetQ = cube1Offsets.qkOffset; 
                     int64_t cube1OffsetK = cube1Offsets.qkOffset; 
                     int64_t cube1OffsetAttn = cube1Offsets.attnWorkOffset; 
-                    LayoutAtten attenLayout{coreNum * chunkSize * PING_PONG_STAGES, cube1Offsets.blockTokens}; 
+                    auto attenLayout = tla::MakeLayout<ElementAtten, LayoutAtten>(coreNum * chunkSize * PING_PONG_STAGES, cube1Offsets.blockTokens);
+                    auto tensorQ = tla::MakeTensor(gmQ[cube1OffsetQ], qLayout, Catlass::Arch::PositionGM{});
+                    auto tensorK = tla::MakeTensor(gmK[cube1OffsetK], kLayout, Catlass::Arch::PositionGM{});
+                    auto tensorAttn = tla::MakeTensor(gmAttnWorkspace[cube1OffsetAttn], attenLayout, Catlass::Arch::PositionGM{});
                     GemmCoord cube1Shape{cube1Offsets.blockTokens, cube1Offsets.blockTokens, kHeadDim};
+                    auto tensorBlockQ = GetTile(tensorQ, tla::MakeCoord(0, 0), tla::MakeShape(cube1Shape.m(), cube1Shape.k()));
+                    auto tensorBlockK = GetTile(tensorK, tla::MakeCoord(0, 0), tla::MakeShape(cube1Shape.k(), cube1Shape.n()));
+                    auto tensorBlockAttn = GetTile(tensorAttn, tla::MakeCoord(0, 0), tla::MakeShape(cube1Shape.m(), cube1Shape.n()));
                     blockMmadQK.preSetFlags();
-                    blockMmadQK(gmQ[cube1OffsetQ], qLayout,
-                            gmK[cube1OffsetK],  kLayout,
-                            gmAttnWorkspace[cube1OffsetAttn],  attenLayout,
-                            cube1Shape);
+                    blockMmadQK(tensorBlockQ, tensorBlockK, tensorBlockAttn, cube1Shape);
                     blockMmadQK.finalWaitFlags();
                     Arch::CrossCoreSetFlag<0x2, PIPE_FIX>(cubeBlockScheduler.cube1Done);
 
@@ -205,12 +211,15 @@ public:
                     int64_t cube2OffsetQ = cube2Offsets.qkOffset;
                     int64_t cube2OffsetH = cube2Offsets.hOffset;
                     int64_t cube2OffsetHWork = cube2Offsets.hvWorkOffset; 
+                    auto tensorQ = tla::MakeTensor(gmQ[cube2OffsetQ], qLayout, Catlass::Arch::PositionGM{});
+                    auto tensorH = tla::MakeTensor(gmH[cube2OffsetH], hLayout, Catlass::Arch::PositionGM{});
+                    auto tensorHWork = tla::MakeTensor(gmHWorkspace[cube2OffsetHWork], ointerLayout, Catlass::Arch::PositionGM{});
                     GemmCoord cube2Shape{cube2Offsets.blockTokens, vHeadDim, kHeadDim};
+                    auto tensorBlockQ = GetTile(tensorQ, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.m(), cube2Shape.k()));
+                    auto tensorBlockH = GetTile(tensorH, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.k(), cube2Shape.n()));
+                    auto tensorBlockHWork = GetTile(tensorHWork, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.m(), cube2Shape.n()));
                     blockMmadQH.preSetFlags();
-                    blockMmadQH(gmQ[cube2OffsetQ], qLayout,
-                            gmH[cube2OffsetH],  hLayout,
-                            gmHWorkspace[cube2OffsetHWork],  ointerLayout,
-                            cube2Shape);
+                    blockMmadQH(tensorBlockQ, tensorBlockH, tensorBlockHWork, cube2Shape);
                     blockMmadQH.finalWaitFlags();
                     Arch::CrossCoreSetFlag<0x2, PIPE_FIX>(cubeBlockScheduler.cube2Done);
                 }
@@ -227,13 +236,16 @@ public:
                     int64_t cube3OffsetAttnMask = cube3Offsets.attnWorkOffset; 
                     int64_t cube3OffsetV = cube3Offsets.ovOffset; 
                     int64_t cube3OffsetVWork = cube3Offsets.hvWorkOffset; 
-                    LayoutAtten attenLayout{coreNum * chunkSize * PING_PONG_STAGES, cube3Offsets.blockTokens}; 
+                    auto attenLayout = tla::MakeLayout<ElementAtten, LayoutAtten>(coreNum * chunkSize * PING_PONG_STAGES, cube3Offsets.blockTokens);
+                    auto tensorAttnMask = tla::MakeTensor(gmAftermaskWorkspace[cube3OffsetAttnMask], attenLayout, Catlass::Arch::PositionGM{});
+                    auto tensorV = tla::MakeTensor(gmV[cube3OffsetV], vnewLayout, Catlass::Arch::PositionGM{});
+                    auto tensorVWork = tla::MakeTensor(gmVWorkspace[cube3OffsetVWork], ointerLayout, Catlass::Arch::PositionGM{});
                     GemmCoord cube3Shape{cube3Offsets.blockTokens, vHeadDim, cube3Offsets.blockTokens};
+                    auto tensorBlockAttnMask = GetTile(tensorAttnMask, tla::MakeCoord(0, 0), tla::MakeShape(cube3Shape.m(), cube3Shape.k()));
+                    auto tensorBlockV = GetTile(tensorV, tla::MakeCoord(0, 0), tla::MakeShape(cube3Shape.k(), cube3Shape.n()));
+                    auto tensorBlockVWork = GetTile(tensorVWork, tla::MakeCoord(0, 0), tla::MakeShape(cube3Shape.m(), cube3Shape.n()));
                     blockMmadAttenVNEW.preSetFlags();
-                    blockMmadAttenVNEW(gmAftermaskWorkspace[cube3OffsetAttnMask], attenLayout,
-                            gmV[cube3OffsetV],  vnewLayout,
-                            gmVWorkspace[cube3OffsetVWork],  ointerLayout,
-                            cube3Shape);
+                    blockMmadAttenVNEW(tensorBlockAttnMask, tensorBlockV, tensorBlockVWork, cube3Shape);
                     blockMmadAttenVNEW.finalWaitFlags();
                     Arch::CrossCoreSetFlag<0x2, PIPE_FIX>(cubeBlockScheduler.cube3Done);
                     isFirstC3 = false;
