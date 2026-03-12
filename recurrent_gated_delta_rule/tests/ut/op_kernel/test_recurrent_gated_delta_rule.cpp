@@ -39,6 +39,8 @@ struct alignas(8) RecurrentGatedDeltaRuleTilingData {
     uint32_t sBlockNum;
     uint32_t b;
     uint32_t vStep;
+    uint32_t stateOutBufferNum;
+    uint32_t attnOutBufferNum;
     float scale;
     uint32_t hasGama;
     uint32_t hasGamaK;
@@ -58,7 +60,8 @@ T* GmAllocWrapper(size_t size) {
 }
 
 void InitTilingData(RecurrentGatedDeltaRuleTilingData* tilingData, uint32_t b, uint32_t t, uint32_t nk, uint32_t nv,
-                    uint32_t dk, uint32_t dv, uint32_t hasGama, uint32_t hasGamaK, uint32_t hasAcceptedTokens) {
+                    uint32_t dk, uint32_t dv, uint32_t hasGama, uint32_t hasGamaK, uint32_t hasAcceptedTokens,
+                    uint32_t vStep = 32, uint32_t stateOutBufferNum = 1, uint32_t attnOutBufferNum = 1) {
     tilingData->vectorCoreNum = 8;
     tilingData->ubCalSize = 192 * 1024;
     tilingData->ubRestBytes = 96 * 1024;
@@ -69,7 +72,9 @@ void InitTilingData(RecurrentGatedDeltaRuleTilingData* tilingData, uint32_t b, u
     tilingData->dv = dv;
     tilingData->sBlockNum = t * nv;
     tilingData->b = b;
-    tilingData->vStep = 32;
+    tilingData->vStep = vStep;
+    tilingData->stateOutBufferNum = stateOutBufferNum;
+    tilingData->attnOutBufferNum = attnOutBufferNum;
     tilingData->scale = 1.0f;
     tilingData->hasGama = hasGama;
     tilingData->hasGamaK = hasGamaK;
@@ -113,6 +118,10 @@ struct RGDRTestParams {
     uint32_t hasGama;
     uint32_t hasGamaK;
     uint32_t hasAcceptedTokens;
+    uint32_t dv;
+    uint32_t vStep;
+    uint32_t stateOutBufferNum;
+    uint32_t attnOutBufferNum;
 };
 
 class RecurrentGatedDeltaRuleTest : public testing::TestWithParam<RGDRTestParams> {
@@ -125,16 +134,16 @@ protected:
     uint32_t dk = 32;
     uint32_t dv = 32;
 
-    size_t shapeState = t * nv * dv * dk * sizeof(bfloat16_t);
-    size_t shapeQ = t * nk * dk * sizeof(bfloat16_t);
-    size_t shapeK = t * nk * dk * sizeof(bfloat16_t);
-    size_t shapeV = t * nv * dv * sizeof(bfloat16_t);
-    size_t shapeBeta = t * nv * sizeof(bfloat16_t);
-    size_t shapeGama = t * nv * sizeof(float);
-    size_t shapeActSeqLen = b * sizeof(int32_t);
-    size_t shapeSsmStaId = t * sizeof(int32_t);
-    size_t shapeNumAccTok = b * sizeof(int32_t);
-    size_t shapeAttnOut = t * nv * dv * sizeof(bfloat16_t);
+    size_t shapeState = 0;
+    size_t shapeQ = 0;
+    size_t shapeK = 0;
+    size_t shapeV = 0;
+    size_t shapeBeta = 0;
+    size_t shapeGama = 0;
+    size_t shapeActSeqLen = 0;
+    size_t shapeSsmStaId = 0;
+    size_t shapeNumAccTok = 0;
+    size_t shapeAttnOut = 0;
     size_t allWorkspaceSize = 196608;
     size_t tilingSize = sizeof(RecurrentGatedDeltaRuleTilingData);
 
@@ -152,6 +161,18 @@ protected:
     uint8_t* tiling = nullptr;
 
     void SetUp() override {
+        auto params = GetParam();
+        dv = params.dv;
+        shapeState = t * nv * dv * dk * sizeof(bfloat16_t);
+        shapeQ = t * nk * dk * sizeof(bfloat16_t);
+        shapeK = t * nk * dk * sizeof(bfloat16_t);
+        shapeV = t * nv * dv * sizeof(bfloat16_t);
+        shapeBeta = t * nv * sizeof(bfloat16_t);
+        shapeGama = t * nv * sizeof(float);
+        shapeActSeqLen = b * sizeof(int32_t);
+        shapeSsmStaId = t * sizeof(int32_t);
+        shapeNumAccTok = b * sizeof(int32_t);
+        shapeAttnOut = t * nv * dv * sizeof(bfloat16_t);
         AscendC::SetKernelMode(KernelMode::AIV_MODE);
         stateGm = GmAllocWrapper<uint8_t>(shapeState);
         queryGm = GmAllocWrapper<uint8_t>(shapeQ);
@@ -177,12 +198,14 @@ protected:
                       numAccTokGm, b,
                       attnOutGM, shapeAttnOut);
 
-        auto params = GetParam(); 
         RecurrentGatedDeltaRuleTilingData* tilingData = reinterpret_cast<RecurrentGatedDeltaRuleTilingData*>(tiling);
         InitTilingData(tilingData, b, t, nk, nv, dk, dv,
                        params.hasGama,
                        params.hasGamaK,
-                       params.hasAcceptedTokens);
+                       params.hasAcceptedTokens,
+                       params.vStep,
+                       params.stateOutBufferNum,
+                       params.attnOutBufferNum);
     }
 
     void TearDown() override {
@@ -206,9 +229,10 @@ INSTANTIATE_TEST_SUITE_P(
     GeneralTests, 
     RecurrentGatedDeltaRuleTest, 
     testing::Values(
-        RGDRTestParams{1, 0, 1}, // general_test_01: has g, no gk, with AcceptedTokens
-        RGDRTestParams{0, 0, 1}, // general_test_02: no g, no gk, with AcceptedTokens
-        RGDRTestParams{1, 0, 0}  // general_test_03: has g, no gk, without AcceptedTokens
+        RGDRTestParams{1, 0, 1, 32, 32, 1, 1}, // general_test_01: has g, no gk, with AcceptedTokens
+        RGDRTestParams{0, 0, 1, 32, 32, 1, 1}, // general_test_02: no g, no gk, with AcceptedTokens
+        RGDRTestParams{1, 0, 0, 32, 32, 1, 1}, // general_test_03: has g, no gk, without AcceptedTokens
+        RGDRTestParams{1, 0, 1, 64, 32, 1, 1}  // multi_v_tile_prefetch: dv > vStep covers split-phase input path
     )
 );
 

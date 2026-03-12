@@ -76,6 +76,13 @@ protected:
         int64_t workingUbBytes = 0;
         int64_t coeff = 0;
     };
+    struct BufferProfile {
+        uint32_t stateOutBufferNum = 1;
+        uint32_t attnOutBufferNum = 1;
+        uint32_t vStep = 0;
+        uint32_t repeatTime = 0;
+        bool valid = false;
+    };
 
     ge::graphStatus CheckContext();
     ge::graphStatus AnalyzeDtype();
@@ -95,7 +102,10 @@ protected:
     void UpdateDynamicBlockDimByTaskUnits();
     int64_t CalcFixedUbBytes(int64_t aNv, int64_t aDv, int64_t aDk) const;
     int64_t CalcWorkingUbBytes(int64_t aNv, int64_t aDv, int64_t aDk) const;
-    int64_t CalcVStepCoeff(int64_t aDk) const;
+    int64_t CalcVStepCoeff(int64_t aDk, uint32_t stateOutBufferNum, uint32_t attnOutBufferNum) const;
+    bool EvaluateBufferProfile(int64_t ubSize, int64_t usedUbBytes, int64_t aDk, uint32_t stateOutBufferNum,
+                               uint32_t attnOutBufferNum, BufferProfile &profile) const;
+    bool IsBetterProfile(const BufferProfile &candidate, const BufferProfile &current) const;
     ge::graphStatus FinalizeVStepFromUb(int64_t ubSize, int64_t usedUbBytes, int64_t coeff);
     ge::graphStatus RuleCheckShapeDimAndRelation();
     ge::graphStatus RuleFillTilingShapeData();

@@ -24,12 +24,17 @@ namespace RecurrentGatedDeltaRule {
 using namespace matmul;
 using namespace AscendC;
 constexpr uint64_t BUFFER_NUM = 1;
+constexpr uint32_t MAX_OUT_BUFFER_NUM = 2;
 constexpr uint64_t MAX_MTP = 8;
 constexpr uint64_t BF16_NUM_PER_BLOCK = 16;
 constexpr uint64_t FP32_NUM_PER_BLOCK = 8;
 constexpr uint32_t REPEAT_LENTH = 64; // 256Byte for float
 constexpr uint32_t MAX_REPEAT_TIME = 255;
+constexpr uint32_t ADD_FOLD_REDUCE_MIN_K = 128;
 
+#ifndef RGDR_ENABLE_ADD_FOLD_REDUCE
+#define RGDR_ENABLE_ADD_FOLD_REDUCE  1
+#endif
 struct RGDRInitParams {
     GM_ADDR query;
     GM_ADDR key;
@@ -60,7 +65,10 @@ public:
         hasAcceptedTokens_ = (tilingData->hasAcceptedTokens == 1);
         hasGama_ = (tilingData->hasGama == 1);
         hasGamaK_ = (tilingData->hasGamaK == 1);
+        useAddFoldReduce_ = (RGDR_ENABLE_ADD_FOLD_REDUCE != 0);
         vStep_ = tilingData->vStep;
+        stateOutBufferNum_ = (tilingData->stateOutBufferNum == MAX_OUT_BUFFER_NUM) ? MAX_OUT_BUFFER_NUM : BUFFER_NUM;
+        attnOutBufferNum_ = (tilingData->attnOutBufferNum == MAX_OUT_BUFFER_NUM) ? MAX_OUT_BUFFER_NUM : BUFFER_NUM;
         restUbSize_ = tilingData->ubRestBytes;
         alignK_ = Ceil(tilingData->dk, BF16_NUM_PER_BLOCK) * BF16_NUM_PER_BLOCK;
         alignV_ = Ceil(tilingData->dv, BF16_NUM_PER_BLOCK) * BF16_NUM_PER_BLOCK;
@@ -115,8 +123,8 @@ public:
             pipe_->InitBuffer(gamaKInQueue_, BUFFER_NUM, MAX_MTP * alignK_ * sizeof(float));
         }
         pipe_->InitBuffer(betaInQueue_, BUFFER_NUM, MAX_MTP * NV_ * sizeof(inType));
-        pipe_->InitBuffer(stateOutQueue_, BUFFER_NUM, alignK_ * vStep_ * sizeof(outType));
-        pipe_->InitBuffer(attnOutQueue_, BUFFER_NUM, vStep_ * sizeof(outType));
+        pipe_->InitBuffer(stateOutQueue_, stateOutBufferNum_, alignK_ * vStep_ * sizeof(outType));
+        pipe_->InitBuffer(attnOutQueue_, attnOutBufferNum_, vStep_ * sizeof(outType));
         pipe_->InitBuffer(tmpBuff, restUbSize_);
         uint32_t buffOffset = 0;
         deltaInUb = tmpBuff.GetWithOffset<float>(static_cast<uint32_t>(vStep_), buffOffset);
@@ -237,7 +245,7 @@ private:
         vInQueue_.FreeTensor(vLocal);
     }
 
-    __aicore__ inline void CopyInState(uint64_t stateOffest, uint32_t curSingleV)
+    __aicore__ inline void PrefetchState(uint64_t stateOffest, uint32_t curSingleV)
     {
         LocalTensor<inType> stateLocal = stateInQueue_.AllocTensor<inType>();
         DataCopyExtParams stateInParams{static_cast<uint16_t>(curSingleV),
@@ -245,7 +253,11 @@ private:
         DataCopyPadExtParams<inType> padParams{true, 0, static_cast<uint8_t>(alignK_ - realK_), 0};
         DataCopyPad(stateLocal, initStateGm_[stateOffest], stateInParams, padParams);
         stateInQueue_.EnQue<inType>(stateLocal);
-        stateLocal = stateInQueue_.DeQue<inType>();
+    }
+
+    __aicore__ inline void LoadPrefetchedState(uint32_t curSingleV)
+    {
+        LocalTensor<inType> stateLocal = stateInQueue_.DeQue<inType>();
         Cast(stateInUb, stateLocal, AscendC::RoundMode::CAST_NONE, alignK_ * curSingleV);
         stateInQueue_.FreeTensor(stateLocal);
     }
@@ -269,22 +281,67 @@ private:
         }
     }
 
+    __aicore__ inline void ReduceSumBaseline(LocalTensor<float> &dstTensor, const LocalTensor<float> &srcTensor,
+                                             uint32_t rows)
+    {
+        uint32_t stateShape[2] = {rows, alignK_};
+        ReduceSum<float, Pattern::Reduce::AR, true>(dstTensor, srcTensor, stateShape, true);
+    }
+
+    __aicore__ inline void ReduceSumAddFold(LocalTensor<float> &dstTensor, LocalTensor<float> &srcTensor,
+                                            uint32_t rows)
+    {
+        if (alignK_ < REPEAT_LENTH) {
+            ReduceSumBaseline(dstTensor, srcTensor, rows);
+            return;
+        }
+        
+        if ((alignK_ & (alignK_ - 1)) != 0) {
+            ReduceSumBaseline(dstTensor, srcTensor, rows);
+            return;
+        }
+
+        for (uint32_t row = 0; row < rows; ++row) {
+            uint32_t rowOffset = row * alignK_;
+            uint32_t activeLen = alignK_;
+            while (activeLen > REPEAT_LENTH) {
+                uint32_t half = activeLen >> 1;
+                Add(srcTensor[rowOffset], srcTensor[rowOffset], srcTensor[rowOffset + half], half);
+                AscendC::PipeBarrier<PIPE_V>();
+                activeLen = half;
+            }
+
+            WholeReduceSum(dstTensor[row], srcTensor[rowOffset], REPEAT_LENTH, 1, 1, 1, FP32_NUM_PER_BLOCK);
+        }
+    }
+
+    __aicore__ inline void ReduceSumDispatch(LocalTensor<float> &dstTensor, LocalTensor<float> &srcTensor,
+                                             uint32_t rows)
+    {
+        if (useAddFoldReduce_ && alignK_ >= ADD_FOLD_REDUCE_MIN_K) {
+            ReduceSumAddFold(dstTensor, srcTensor, rows);
+            return;
+        }
+        ReduceSumBaseline(dstTensor, srcTensor, rows);
+    }
+
     __aicore__ inline void Compute(uint32_t curSingleV, uint64_t curQKOffset, uint64_t curVOffset)
     {
         uint32_t stateShape[2] = {curSingleV, alignK_};
         uint32_t ktShape[2] = {1, alignK_};
         uint32_t deltaShape[2] = {curSingleV, 1};
         if (hasGama_) {
-            AscendC::PipeBarrier<PIPE_V>();
             Muls(stateInUb, stateInUb, gama_, alignK_ * curSingleV);
         }
         if (hasGamaK_) {
             MatVecMul(stateInUb, gamaKInUb[curQKOffset], stateInUb, curSingleV, false);
         }
-        AscendC::PipeBarrier<PIPE_V>();
+        if (hasGama_ || hasGamaK_) {
+            AscendC::PipeBarrier<PIPE_V>();
+        }
         MatVecMul(stateInUb, kInUb[curQKOffset], broadTmpInUb, curSingleV, false);
         AscendC::PipeBarrier<PIPE_V>();
-        ReduceSum<float, Pattern::Reduce::AR, true>(deltaInUb, broadTmpInUb, stateShape, true);
+        ReduceSumDispatch(deltaInUb, broadTmpInUb, curSingleV);
         AscendC::PipeBarrier<PIPE_V>();
         deltaInUb = vInUb[curVOffset] - deltaInUb;
         AscendC::PipeBarrier<PIPE_V>();
@@ -296,12 +353,11 @@ private:
         AscendC::PipeBarrier<PIPE_V>();
         MatVecMul(stateInUb, qInUb[curQKOffset], broadTmpInUb, curSingleV, false);
         AscendC::PipeBarrier<PIPE_V>();
-        ReduceSum<float, Pattern::Reduce::AR, true>(attnInUb, broadTmpInUb, stateShape, true);
+        ReduceSumDispatch(attnInUb, broadTmpInUb, curSingleV);
         LocalTensor<outType> stateOutLocal = stateOutQueue_.AllocTensor<outType>();
         LocalTensor<outType> attnOutLocal = attnOutQueue_.AllocTensor<outType>();
         Cast(stateOutLocal, stateInUb, AscendC::RoundMode::CAST_RINT, alignK_ * curSingleV);
         stateOutQueue_.EnQue<outType>(stateOutLocal);
-        AscendC::PipeBarrier<PIPE_V>();
         Cast(attnOutLocal, attnInUb, AscendC::RoundMode::CAST_RINT, curSingleV);
         attnOutQueue_.EnQue<outType>(attnOutLocal);
     }
@@ -351,10 +407,29 @@ private:
         uint64_t vOffset = (seq0 * NV_ + head_i) * realV_;
         uint64_t qkOffset = (seq0 * NK_ + head_i / (NV_ / NK_)) * realK_;
         CopyInQKV(vOffset, qkOffset, seq1 - seq0);
+        if (realV_ == 0) {
+            if (hasGamaK_) {
+                gamaKInQueue_.FreeTensor(gamaKInUb);
+            }
+            return;
+        }
+        uint64_t nextVOffset = 0;
+        uint32_t nextSingleV = realV_ > vStep_ ? vStep_ : realV_;
+        uint64_t nextStateOffset = ((stateOffset * NV_ + head_i) * realV_) * realK_;
+        PrefetchState(nextStateOffset, nextSingleV);
         for (uint64_t v_i = 0; v_i < realV_; v_i += vStep_) {
             uint32_t curSingleV = v_i + vStep_ > realV_ ? realV_ - v_i : vStep_;
-            uint64_t curStateOffset = ((stateOffset * NV_ + head_i) * realV_ + v_i) * realK_;
-            CopyInState(curStateOffset, curSingleV);
+            LoadPrefetchedState(curSingleV);
+            nextVOffset = v_i + vStep_;
+            if (nextVOffset < realV_) {
+                nextSingleV = nextVOffset + vStep_ > realV_ ? realV_ - nextVOffset : vStep_;
+                nextStateOffset = ((stateOffset * NV_ + head_i) * realV_ + nextVOffset) * realK_;
+                PrefetchState(nextStateOffset, nextSingleV);
+            }
+            uint64_t pendingAttnOffset = 0;
+            uint64_t pendingStateOffset = 0;
+            bool hasPendingAttn = false;
+            bool hasPendingState = false;
             for (uint64_t seq_i = seq0; seq_i < seq1; seq_i++) {
                 uint64_t gbOffset = head_i + (seq_i - seq0) * NV_;
                 uint64_t curQKOffset = (seq_i - seq0) * alignK_;
@@ -365,8 +440,30 @@ private:
                 gama_ = hasGama_ ? gamaInUb.GetValue(gbOffset) : 1;
                 beta_ = betaInUb.GetValue(gbOffset);
                 Compute(curSingleV, curQKOffset, curVOffset);
-                CopyOutAttn(attnOffset, curSingleV);
-                CopyOutState(curStateOutOffset, curSingleV);
+                if (attnOutBufferNum_ == BUFFER_NUM) {
+                    CopyOutAttn(attnOffset, curSingleV);
+                } else {
+                    if (hasPendingAttn) {
+                        CopyOutAttn(pendingAttnOffset, curSingleV);
+                    }
+                    pendingAttnOffset = attnOffset;
+                    hasPendingAttn = true;
+                }
+                if (stateOutBufferNum_ == BUFFER_NUM) {
+                    CopyOutState(curStateOutOffset, curSingleV);
+                } else {
+                    if (hasPendingState) {
+                        CopyOutState(pendingStateOffset, curSingleV);
+                    }
+                    pendingStateOffset = curStateOutOffset;
+                    hasPendingState = true;
+                }
+            }
+            if (hasPendingAttn) {
+                CopyOutAttn(pendingAttnOffset, curSingleV);
+            }
+            if (hasPendingState) {
+                CopyOutState(pendingStateOffset, curSingleV);
             }
         }
         if (hasGamaK_) {
@@ -406,8 +503,8 @@ private:
     TQue<QuePosition::VECIN, 1> gamaKInQueue_;
     TQue<QuePosition::VECIN, 1> betaInQueue_;
     TQue<QuePosition::VECIN, 1> stateInQueue_;
-    TQue<QuePosition::VECOUT, 1> attnOutQueue_;
-    TQue<QuePosition::VECOUT, 1> stateOutQueue_;
+    TQue<QuePosition::VECOUT, MAX_OUT_BUFFER_NUM> attnOutQueue_;
+    TQue<QuePosition::VECOUT, MAX_OUT_BUFFER_NUM> stateOutQueue_;
     TBuf<TPosition::VECCALC> tmpBuff;
     LocalTensor<float> qInUb;
     LocalTensor<float> kInUb;
@@ -428,6 +525,8 @@ private:
     uint32_t alignV_;
     uint32_t realV_;
     uint32_t vStep_;
+    uint32_t stateOutBufferNum_;
+    uint32_t attnOutBufferNum_;
     uint32_t restUbSize_;
     uint32_t load;
     uint32_t usedblk;
@@ -435,6 +534,7 @@ private:
     bool hasAcceptedTokens_;
     bool hasGama_;
     bool hasGamaK_;
+    bool useAddFoldReduce_;
     float gama_;
     float beta_;
     float scale_;

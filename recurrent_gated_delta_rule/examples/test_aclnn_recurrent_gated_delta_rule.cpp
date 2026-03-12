@@ -123,13 +123,13 @@ int main()
     aclTensor *attnOut = nullptr;
 
     // 自定义输入与属性
-    int32_t batchSize = 2;
+    int32_t batchSize = 32;
     int32_t mtp = 2;
     int32_t headKNum = 4;
     int32_t headVNum = 8;
-    int32_t dimV = 32;
-    int32_t dimK = 32;
-
+    int32_t dimV = 128;
+    int32_t dimK = 128;
+ 
 
     std::vector<int64_t> stateShape = {batchSize * mtp, headVNum, dimV, dimK};
     std::vector<int64_t> qkShape = {batchSize * mtp, headKNum, dimK};
@@ -148,7 +148,7 @@ int main()
     std::vector<int32_t> numAccTokHostData(batchSize, 1);
     for (int i = 0; i < stateRefHostData.size(); i++) {
         stateRefHostData[i] = 1;
-    }
+    } 
     for (int i = 0; i < queryHostData.size(); i++) {
         queryHostData[i] = 1;
     }

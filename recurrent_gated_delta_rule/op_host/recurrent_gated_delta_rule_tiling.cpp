@@ -373,7 +373,7 @@ ge::graphStatus RecurrentGatedDeltaRuleTiling::RuleCalcWorkingUbBytes()
 
 ge::graphStatus RecurrentGatedDeltaRuleTiling::RuleCalcVStepCoeff()
 {
-    ubCalcCtx_.coeff = CalcVStepCoeff(ubCalcCtx_.aDk);
+    ubCalcCtx_.coeff = CalcVStepCoeff(ubCalcCtx_.aDk, 1, 1);
     return ge::GRAPH_SUCCESS;
 }
 
@@ -486,8 +486,11 @@ void RecurrentGatedDeltaRuleTiling::PrintTilingData()
     OP_LOGD(context_->GetNodeName(), "sBlockNum: [%u]", tilingData_.sBlockNum);
     OP_LOGD(context_->GetNodeName(), "b: [%u]", tilingData_.b);
     OP_LOGD(context_->GetNodeName(), "vStep: [%u]", tilingData_.vStep);
+    OP_LOGD(context_->GetNodeName(), "stateOutBufferNum: [%u]", tilingData_.stateOutBufferNum);
+    OP_LOGD(context_->GetNodeName(), "attnOutBufferNum: [%u]", tilingData_.attnOutBufferNum);
     OP_LOGD(context_->GetNodeName(), "scale: [%f]", tilingData_.scale);
     OP_LOGD(context_->GetNodeName(), "hasGama: [%u]", tilingData_.hasGama);
+    OP_LOGD(context_->GetNodeName(), "hasGamaK: [%u]", tilingData_.hasGamaK);
     OP_LOGD(context_->GetNodeName(), "hasAcceptedTokens: [%u]", tilingData_.hasAcceptedTokens);
 }
 
@@ -512,27 +515,91 @@ int64_t RecurrentGatedDeltaRuleTiling::CalcWorkingUbBytes(int64_t aNv, int64_t a
     return usedUbBytes;
 }
 
-int64_t RecurrentGatedDeltaRuleTiling::CalcVStepCoeff(int64_t aDk) const
+int64_t RecurrentGatedDeltaRuleTiling::CalcVStepCoeff(int64_t aDk, uint32_t stateOutBufferNum,
+                                                       uint32_t attnOutBufferNum) const
 {
-    int64_t coeff = (2 + 2) * aDk + 4; // 2 for stateInQueue_, stateOutQueue_, 4 for attnOutQueue_
-    coeff += (4 + 4) * aDk + 4 + 4;    // 4 for qInUb, kInUb, vInUb, deltaInUb, attnInUb
+    int64_t coeff = (2 + static_cast<int64_t>(2 * stateOutBufferNum)) * aDk +
+                    static_cast<int64_t>(4 * attnOutBufferNum); // stateIn/stateOut/attnOut queues
+    coeff += (4 + 4) * aDk + 4 + 4;                             // qInUb/kInUb/vInUb/deltaInUb/attnInUb
     return coeff;
+}
+
+bool RecurrentGatedDeltaRuleTiling::EvaluateBufferProfile(int64_t ubSize, int64_t usedUbBytes, int64_t aDk,
+                                                           uint32_t stateOutBufferNum, uint32_t attnOutBufferNum,
+                                                           BufferProfile &profile) const
+{
+    int64_t coeff = CalcVStepCoeff(aDk, stateOutBufferNum, attnOutBufferNum);
+    int64_t vStep = (ubSize - usedUbBytes) / coeff / 8 * 8; // 8 * sizeof(float) = 32
+    if (vStep < 8) {
+        return false;
+    }
+    int64_t repeatTime = Ops::Base::CeilDiv(tilingData_.dv, static_cast<uint32_t>(vStep));
+    vStep = Ops::Base::CeilAlign(Ops::Base::CeilDiv(tilingData_.dv, static_cast<uint32_t>(repeatTime)),
+                                 static_cast<uint32_t>(8));
+    if (vStep < 8) {
+        return false;
+    }
+    profile.stateOutBufferNum = stateOutBufferNum;
+    profile.attnOutBufferNum = attnOutBufferNum;
+    profile.vStep = static_cast<uint32_t>(vStep);
+    profile.repeatTime = static_cast<uint32_t>(repeatTime);
+    profile.valid = true;
+    return true;
+}
+
+bool RecurrentGatedDeltaRuleTiling::IsBetterProfile(const BufferProfile &candidate, const BufferProfile &current) const
+{
+    if (!current.valid) {
+        return true;
+    }
+    if (candidate.repeatTime != current.repeatTime) {
+        return candidate.repeatTime < current.repeatTime;
+    }
+    uint32_t candidateDepth = candidate.stateOutBufferNum + candidate.attnOutBufferNum;
+    uint32_t currentDepth = current.stateOutBufferNum + current.attnOutBufferNum;
+    if (candidateDepth != currentDepth) {
+        return candidateDepth > currentDepth;
+    }
+    return candidate.vStep > current.vStep;
 }
 
 ge::graphStatus RecurrentGatedDeltaRuleTiling::FinalizeVStepFromUb(int64_t ubSize, int64_t usedUbBytes, int64_t coeff)
 {
-    int64_t vStep = (ubSize - usedUbBytes) / coeff / 8 * 8; // 8 * sizeof(float) = 32
-    if (vStep < 8) {                                        
+    (void)coeff;
+    int64_t aDk = Ops::Base::CeilAlign(tilingData_.dk, static_cast<uint32_t>(16)); // 16 * 2 = 32B
+    BufferProfile selected;
+    const std::array<BufferProfile, 3> candidates = {{
+        {1, 1, 0, 0, false},
+        {1, 2, 0, 0, false},
+        {2, 2, 0, 0, false},
+    }};
+    for (const auto &candidate : candidates) {
+        BufferProfile profile;
+        if (!EvaluateBufferProfile(ubSize, usedUbBytes, aDk, candidate.stateOutBufferNum, candidate.attnOutBufferNum,
+                                   profile)) {
+            continue;
+        }
+        if (IsBetterProfile(profile, selected)) {
+            selected = profile;
+        }
+    }
+    if (!selected.valid) {
         OP_LOGE(context_->GetNodeName(), "vStep should be bigger than 8, shape is too big");
         return ge::GRAPH_FAILED;
     }
-    int64_t rptime = Ops::Base::CeilDiv(tilingData_.dv, static_cast<uint32_t>(vStep));
-    vStep = Ops::Base::CeilAlign(Ops::Base::CeilDiv(tilingData_.dv, static_cast<uint32_t>(rptime)),
-                                 static_cast<uint32_t>(8)); // 8 * sizeof(float) = 32
-    int64_t aDk = Ops::Base::CeilAlign(tilingData_.dk, static_cast<uint32_t>(16)); // 16 * 2 = 32B
+
+    int64_t queueCoeff = (2 + static_cast<int64_t>(2 * selected.stateOutBufferNum)) * aDk +
+                         static_cast<int64_t>(4 * selected.attnOutBufferNum);
+    int64_t ubRestBytes = ubSize - ubCalcCtx_.fixedUbBytes - queueCoeff * static_cast<int64_t>(selected.vStep);
+    if (ubRestBytes < 0) {
+        OP_LOGE(context_->GetNodeName(), "ubRestBytes should be non-negative, but got %ld", ubRestBytes);
+        return ge::GRAPH_FAILED;
+    }
     tilingData_.ubCalSize = compileInfo_.ubSize;
-    tilingData_.vStep = vStep;
-    tilingData_.ubRestBytes -= ((2 + 2) * aDk + 4) * vStep; // 2 for stateInQueue_, stateOutQueue_, 4 for attnOutQueue_
+    tilingData_.vStep = selected.vStep;
+    tilingData_.stateOutBufferNum = selected.stateOutBufferNum;
+    tilingData_.attnOutBufferNum = selected.attnOutBufferNum;
+    tilingData_.ubRestBytes = static_cast<uint32_t>(ubRestBytes);
     return ge::GRAPH_SUCCESS;
 }
 
