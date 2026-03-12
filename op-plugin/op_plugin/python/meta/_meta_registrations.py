@@ -519,7 +519,7 @@ def npu_prepare_wy_repr_bwd_full(k, v, beta, a, dA, dw, du, g, cu_seqlens, chunk
 
 @impl(m, "npu_chunk_bwd_dqkwg")
 def npu_chunk_bwd_dqkwg(q, k, v, g, h, dox, dh, dv, cu_seqlens_, chunk_indices_, scale, chunk_size):
-    chunk_num = len(cu_seqlens.size) - 1
+    # chunk_num = len(cu_seqlens.size) - 1
     B = q.size(0)
     H = q.size(1)
     T = q.size(2)
