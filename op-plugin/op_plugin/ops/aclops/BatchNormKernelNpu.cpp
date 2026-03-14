@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Huawei Technologies Co., Ltd
+// Copyright (c) 2023 Tianjin University, Ltd
 // 版权所有 (c) 2023 华为技术有限公司
 // All rights reserved.
 //

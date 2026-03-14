@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+# Copyright (c) Tianjin University, Ltd. 2025. All rights reserved.
 import random
 from typing import Union, List
 

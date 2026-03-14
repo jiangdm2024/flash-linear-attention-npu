@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+# Copyright (c) Tianjin University, Ltd. 2025. All rights reserved.
 import torch
 from dataclasses import dataclass
 import numpy as np
