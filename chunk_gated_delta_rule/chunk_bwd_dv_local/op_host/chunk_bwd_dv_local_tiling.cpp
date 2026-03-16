@@ -216,12 +216,12 @@ ge::graphStatus Tiling4ChunkBwdDvLocal(gert::TilingContext *context)
 
     OP_CHECK_IF(processor.PreCheck() != ge::GRAPH_SUCCESS, , return ge::GRAPH_FAILED);
     OP_CHECK_IF(processor.CommonTiling() != ge::GRAPH_SUCCESS, , return ge::GRAPH_FAILED);
-    if (tiling.get_b() != V_L_B){
+    auto cuSeqlensTensor = context->GetOptionalInputTensor(INPUT_SEQLENS_IDX);
+    if (cuSeqlensTensor == nullptr){
         OP_CHECK_IF(processor.FixLenTiling() != ge::GRAPH_SUCCESS, , return ge::GRAPH_FAILED);
         context->SetTilingKey(FIX_LEN_TILING_KEY);
     } else {
-        auto cuSeqlensTensor = context->GetOptionalInputTensor(INPUT_SEQLENS_IDX);
-        OP_CHECK_IF(cuSeqlensTensor == nullptr, OP_LOGE(context->GetNodeName(), "cu_seqlens cannot be nullptr when B is 1."), return ge::GRAPH_FAILED);
+        OP_CHECK_IF(tiling.get_b() != V_L_B, OP_LOGE(context->GetNodeName(), "B cannot be 1 when cu_seqlens is nullptr."), return ge::GRAPH_FAILED);
         OP_CHECK_IF(processor.VariableLenTiling() != ge::GRAPH_SUCCESS, , return ge::GRAPH_FAILED);
         context->SetTilingKey(VARIABLE_LEN_TILING_KEY);
     }

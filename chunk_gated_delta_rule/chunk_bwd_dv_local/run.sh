@@ -9,10 +9,10 @@ source  /data/yzq/CANN0124/ascend-toolkit/set_env.sh
 cd /data/clx/flash-linear-attention-npu/
 
 # ############################## custom编译安装 ##############################
-rm -rf build
-bash build.sh --pkg --soc=ascend910b --ops=$op
-export TMPDIR=/data/clx/tmp
-./build/cann-ops-transformer-custom_linux-aarch64.run  --install-path=/data/clx/transformer_custom
+# rm -rf build
+# bash build.sh --pkg --soc=ascend910b --ops=$op
+# export TMPDIR=/data/clx/tmp
+# ./build/cann-ops-transformer-custom_linux-aarch64.run  --install-path=/data/clx/transformer_custom
 
 source /data/clx/transformer_custom/vendors/custom_transformer/bin/set_env.bash
 
@@ -39,7 +39,7 @@ source /data/clx/transformer_custom/vendors/custom_transformer/bin/set_env.bash
 
 # python /data/clx/ops-transformer_GDN/chunk_gated_delta_rule/chunk_bwd_dv_local/tests/pta/test_single.py
 
-# python /data/clx/ops-transformer_GDN/chunk_gated_delta_rule/chunk_bwd_dv_local/tests/pta/test_all.py
+# python /data/clx/flash-linear-attention-npu/chunk_gated_delta_rule/chunk_bwd_dv_local/tests/pta/test_all.py
 python /data/clx/flash-linear-attention-npu/chunk_gated_delta_rule/chunk_bwd_dv_local/tests/pta/test_single.py
 
 # python  /data/zs/ops-transformer_GDN/test.py 
@@ -49,8 +49,8 @@ python /data/clx/flash-linear-attention-npu/chunk_gated_delta_rule/chunk_bwd_dv_
 # source /data/zs/run/8.5/ascend-toolkit/set_env.sh
 # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/zs/run/8.5/cann-8.5.0/aarch64-linux/simulator/Ascend910B1/lib
 
-# # msprof op simulator  --application="python3 /data/clx/ops-transformer_GDN/chunk_gated_delta_rule/chunk_bwd_dv_local/tests/pta_test.py"
-# msprof op  --application="python3 /data/clx/ops-transformer_GDN/chunk_gated_delta_rule/chunk_bwd_dv_local/tests/pta_test.py"
+# msprof op simulator  --application="python3 /data/clx/flash-linear-attention-npu/chunk_gated_delta_rule/chunk_bwd_dv_local/tests/pta/test_single.py"
+# msprof op  --application="python3 /data/clx/flash-linear-attention-npu/chunk_gated_delta_rule/chunk_bwd_dv_local/tests/pta/test_single.py"
 
 
 

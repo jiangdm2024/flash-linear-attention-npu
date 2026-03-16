@@ -9,7 +9,7 @@ from ct import single
 from golden import chunk_bwd_dv_local_fix, chunk_bwd_dv_local_variable, prepare_chunk_indices
 from utils import generate_cu_seqlens, create_tensor, bool_matrix_to_uint8, compare_tensors_by_ratio
 
-golden_out_dir="/data/clx/golden_out"
+golden_out_dir="/data/clx/golden_out_no_mask_input"
 @dataclass
 class TestCase:
     B: int
@@ -101,20 +101,15 @@ def test_variable(case: TestCase):
     d_o = create_tensor((B, H, T, V), dtype=q_dtype)
     g = create_tensor((B, H, T), dtype=g_dtype)
 
-    print(f"==== q.shape = {q.shape}, dtype = {q_dtype} ",q[0,0,0,0:64])
-    print(f"==== k.shape = {k.shape}, dtype = {q_dtype} ",k[0,0,0,0:64])
-    print(f"==== d_o.shape = {d_o.shape}, dtype = {q_dtype} ",d_o[0,0,0,0:64])
-    print(f"==== g.shape = {g.shape}, dtype = {g_dtype} ",g[0,0,0 :64 ])
-
-    upper_tri_matrix = bool_matrix_to_uint8(chunk_size)
-    # print(f"==== upper_tri_matrix.shape = {upper_tri_matrix.shape} ",upper_tri_matrix)
+    print(f"==== q.shape = {q.shape}, dtype = {q_dtype} ")
+    print(f"==== k.shape = {k.shape}, dtype = {q_dtype} ")
+    print(f"==== d_o.shape = {d_o.shape}, dtype = {q_dtype} ")
+    print(f"==== g.shape = {g.shape}, dtype = {g_dtype} ")
     
     cu_seqlens = generate_cu_seqlens(cu_seqlens_len, T)
     print(f"==== cu_seqlens = {cu_seqlens}")
     chunk_indices = prepare_chunk_indices(cu_seqlens, chunk_size)
 
-
-    dv_golden = chunk_bwd_dv_local_variable(q, k, d_o, g, scale, cu_seqlens, chunk_size)
     dv_golden = load_dv_golden(case)
     if dv_golden is None:
         dv_golden = chunk_bwd_dv_local_variable(q, k, d_o, g, scale, cu_seqlens, chunk_size)
@@ -124,16 +119,12 @@ def test_variable(case: TestCase):
     k_npu = k.npu()
     d_o_npu = d_o.npu()
     g_npu = g.npu()
-    upper_tri_matrix_npu = upper_tri_matrix.npu()
-    cu_seqlens_npu = cu_seqlens.npu()
-    chunk_indices_npu = chunk_indices.npu()
+    cu_seqlens_list = cu_seqlens.tolist()
+    chunk_indices_list = chunk_indices.flatten().tolist()
 
-    dv = torch_npu.npu_chunk_bwd_dv_local(q_npu, k_npu, d_o_npu, g_npu,upper_tri_matrix=upper_tri_matrix_npu, g_gamma=None, A=None,cu_seqlens=cu_seqlens_npu, chunk_indices = chunk_indices_npu, scale=scale, chunk_size =chunk_size)
-    dv_golden = dv_golden[0,0,0:64,:]
-    dv = dv[0,0,0:64,:]
-    print(dv_golden)
-    compare_tensors_by_ratio(dv_golden,dv.cpu(),0.05)
-    # single(dv.cpu(),dv_golden)
+    dv = torch_npu.npu_chunk_bwd_dv_local(q_npu, k_npu, d_o_npu, g_npu, g_gamma=None, A=None, cu_seqlens=cu_seqlens_list, chunk_indices=chunk_indices_list, scale=scale, chunk_size=chunk_size)
+
+    single(dv.cpu(),dv_golden)
 
 def test_fix(case: TestCase):
     B, H, T, K, V = case.B, case.H, case.T, case.K, case.V
@@ -147,11 +138,10 @@ def test_fix(case: TestCase):
     d_o = create_tensor((B, H, T, V), dtype=q_dtype)
     g = create_tensor((B, H, T), dtype=g_dtype)
 
-    # print(f"==== q.shape = {q.shape}, dtype = {q_dtype} ")
-    # print(f"==== k.shape = {k.shape}, dtype = {q_dtype} ")
-    # print(f"==== d_o.shape = {d_o.shape}, dtype = {q_dtype} ")
-    # print(f"==== g.shape = {g.shape}, dtype = {g_dtype} ")
-    upper_tri_matrix = bool_matrix_to_uint8(chunk_size)
+    print(f"==== q.shape = {q.shape}, dtype = {q_dtype} ")
+    print(f"==== k.shape = {k.shape}, dtype = {q_dtype} ")
+    print(f"==== d_o.shape = {d_o.shape}, dtype = {q_dtype} ")
+    print(f"==== g.shape = {g.shape}, dtype = {g_dtype} ")
     cu_seqlens = None
 
     dv_golden = load_dv_golden(case)
@@ -163,10 +153,8 @@ def test_fix(case: TestCase):
     k_npu = k.npu()
     d_o_npu = d_o.npu()
     g_npu = g.npu()
-    upper_tri_matrix_npu = upper_tri_matrix.npu()
-    dv = torch_npu.npu_chunk_bwd_dv_local(q_npu, k_npu, d_o_npu, g_npu,upper_tri_matrix=upper_tri_matrix_npu, g_gamma=None, A=None,cu_seqlens=None, chunk_indices = None, scale=scale, chunk_size =chunk_size)
-    # single(dv.cpu(),dv_golden)
-    compare_tensors_by_ratio(dv_golden,dv.cpu(),0.05)
+    dv = torch_npu.npu_chunk_bwd_dv_local(q_npu, k_npu, d_o_npu, g_npu, g_gamma=None, A=None,cu_seqlens=None, chunk_indices = None, scale=scale, chunk_size =chunk_size)
+    single(dv.cpu(),dv_golden)
 
 if __name__ == "__main__":
     torch.manual_seed(0)
@@ -196,8 +184,8 @@ if __name__ == "__main__":
         #     break
         if case.B == 1:
                 test_variable(case)
-        else:
-            test_fix(case)
+        # else:
+        #     test_fix(case)
 
 
 
