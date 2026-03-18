@@ -148,18 +148,12 @@ public:
             auto vworkLayout = tla::MakeLayout<ElementVWork, LayoutV>(coreNum * chunkSize * PING_PONG_STAGES, vHeadDim);
             auto hworkLayout = tla::MakeLayout<ElementHWork, LayoutH>(coreNum * kHeadDim * PING_PONG_STAGES, vHeadDim);
 
-            bool needRun = false;
-
             while (cubeBlockScheduler.isRunning) {
                 cubeBlockScheduler.InitTask();
                 // step 1: v_work = w @ h[i]
-                GDNFwdHOffsets& cube1Offsets = cubeBlockScheduler.GetCube1Offsets();
-                if (cube1Offsets.chunkIdx != 0) {
-                    Arch::CrossCoreWaitFlag(cubeBlockScheduler.vec2Done);
-                } else {
-                    Arch::CrossCoreWaitFlag(cubeBlockScheduler.vec1Done);
-                }
-                if (!cube1Offsets.isDummyHead) {
+                GDNFwdHOffsets& cube1Offsets = cubeBlockScheduler.GetStage1Offsets();
+                Arch::CrossCoreWaitFlag(cubeBlockScheduler.vec2Done);
+                if (cubeBlockScheduler.NeedProcessStage1()) {
                     int64_t cube1OffsetW = cube1Offsets.wOffset;
                     int64_t cube1OffsetH = cube1Offsets.hSrcOffset;
                     int64_t cube1OffsetVwork = cube1Offsets.vWorkOffset;
@@ -176,31 +170,27 @@ public:
                 }
                 Arch::CrossCoreSetFlag<0x2, PIPE_FIX>(cubeBlockScheduler.cube1Done);
 
-                GDNFwdHOffsets& cube2Offsets = cubeBlockScheduler.GetCube2Offsets();
-                if (!cube2Offsets.isFinalState && needRun) {
-                    Arch::CrossCoreWaitFlag(cubeBlockScheduler.vec1Done);
+                Arch::CrossCoreWaitFlag(cubeBlockScheduler.vec1Done);
+                GDNFwdHOffsets& cube2Offsets = cubeBlockScheduler.GetStage2Offsets();
+                if (cubeBlockScheduler.NeedProcessStage2()) {
                     // step 3: h[i+1] = k.T @ v_work
-                    if (!cube2Offsets.isDummyHead) {
-                        int64_t cube2OffsetK = cube2Offsets.wkOffset;
-                        int64_t cube2OffsetVwork = cube2Offsets.vWorkOffset;
-                        int64_t cube2OffsetH = cube2Offsets.hWorkOffset;
-                        auto tensorK = tla::MakeTensor(gmK[cube2OffsetK], kLayout, Catlass::Arch::PositionGM{});
-                        auto tensorVwork = tla::MakeTensor(gmVWorkspace[cube2OffsetVwork], vworkLayout, Catlass::Arch::PositionGM{});
-                        auto tensorHwork = tla::MakeTensor(gmHWorkspaceHalf[cube2OffsetH], hworkLayout, Catlass::Arch::PositionGM{});
-                        GemmCoord cube2Shape{kHeadDim, vHeadDim, cube2Offsets.blockTokens};
-                        auto tensorBlockK = GetTile(tensorK, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.m(), cube2Shape.k()));
-                        auto tensorBlockVwork = GetTile(tensorVwork, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.k(), cube2Shape.n()));
-                        auto tensorBlockHwork = GetTile(tensorHwork, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.m(), cube2Shape.n()));
-                        blockMmadKV.preSetFlags();
-                        blockMmadKV(tensorBlockK, tensorBlockVwork, tensorBlockHwork, cube2Shape);
-                        blockMmadKV.finalWaitFlags();
-                    }
-                    Arch::CrossCoreSetFlag<0x2, PIPE_FIX>(cubeBlockScheduler.cube2Done);
+                    int64_t cube2OffsetK = cube2Offsets.wkOffset;
+                    int64_t cube2OffsetVwork = cube2Offsets.vWorkOffset;
+                    int64_t cube2OffsetH = cube2Offsets.hWorkOffset;
+                    auto tensorK = tla::MakeTensor(gmK[cube2OffsetK], kLayout, Catlass::Arch::PositionGM{});
+                    auto tensorVwork = tla::MakeTensor(gmVWorkspace[cube2OffsetVwork], vworkLayout, Catlass::Arch::PositionGM{});
+                    auto tensorHwork = tla::MakeTensor(gmHWorkspaceHalf[cube2OffsetH], hworkLayout, Catlass::Arch::PositionGM{});
+                    GemmCoord cube2Shape{kHeadDim, vHeadDim, cube2Offsets.blockTokens};
+                    auto tensorBlockK = GetTile(tensorK, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.m(), cube2Shape.k()));
+                    auto tensorBlockVwork = GetTile(tensorVwork, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.k(), cube2Shape.n()));
+                    auto tensorBlockHwork = GetTile(tensorHwork, tla::MakeCoord(0, 0), tla::MakeShape(cube2Shape.m(), cube2Shape.n()));
+                    blockMmadKV.preSetFlags();
+                    blockMmadKV(tensorBlockK, tensorBlockVwork, tensorBlockHwork, cube2Shape);
+                    blockMmadKV.finalWaitFlags();
                 }
-                needRun = true;
+                Arch::CrossCoreSetFlag<0x2, PIPE_FIX>(cubeBlockScheduler.cube2Done);
             }
-            Arch::CrossCoreWaitFlag(cubeBlockScheduler.vec1Done);
-            Arch::CrossCoreWaitFlag(cubeBlockScheduler.vec1Done);
+            Arch::CrossCoreWaitFlag(cubeBlockScheduler.vec2Done);
 
         }
 
@@ -211,19 +201,17 @@ public:
             uint32_t subBlockNum = AscendC::GetSubBlockNum();
 
             EpilogueGDNFwdHVnew epilogueGDNFwdHVnew(resource);
-            bool needRun = false;
 
-            Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(vecBlockScheduler.vec1Done);
-            Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(vecBlockScheduler.vec1Done);
+            Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(vecBlockScheduler.vec2Done);
             while (vecBlockScheduler.isRunning) {
                 vecBlockScheduler.InitTask();
                 // step 2:
-                GDNFwdHOffsets& vec1Offsets = vecBlockScheduler.GetVec1Offsets();
+                GDNFwdHOffsets& vec1Offsets = vecBlockScheduler.GetStage1Offsets();
                 // gmV = gmU - gmVWorkspace
                 // g_buf = gmG[-1] - gmG
                 // g_buf = exp(g_buf)
                 // gmVWorkspace = g_buf * gmV
-                if (!vec1Offsets.isDummyHead) {
+                if (vecBlockScheduler.NeedProcessStage1()) {
                     epilogueGDNFwdHVnew(
                         gmV[vec1Offsets.uvOffset], gmVWorkspace[vec1Offsets.vWorkOffset], 
                         gmG[vec1Offsets.gOffset], gmU[vec1Offsets.uvOffset], gmVWorkspaceHalf[vec1Offsets.vWorkOffset], 
@@ -234,24 +222,22 @@ public:
                 }
                 Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(vecBlockScheduler.vec1Done);
 
-                GDNFwdHOffsets& vec2Offsets = vecBlockScheduler.GetVec2Offsets();
-                if (!vec2Offsets.isFinalState && needRun) {
+                GDNFwdHOffsets& vec2Offsets = vecBlockScheduler.GetStage2Offsets();
+                if (vecBlockScheduler.NeedProcessStage2()) {
                     // step 4:  h[i+1] += h_work if i < num_chunks - 1 else None
-                    if (!vec2Offsets.isDummyHead) {
-                        EpilogueGDNFwdHUpdate epilogueGDNFwdHUpdate(resource);
-                        epilogueGDNFwdHUpdate(
-                            gmH[vec2Offsets.hDstOffset],
-                            gmG[vec2Offsets.gOffset],
-                            gmH[vec2Offsets.hSrcOffset],
-                            gmHWorkspaceHalf[vec2Offsets.hWorkOffset],
-                            vec2Offsets.blockTokens, kHeadDim, vHeadDim, vecBlockScheduler.cube2Done
-                        );
-                    } else {
-                        Arch::CrossCoreWaitFlag(vecBlockScheduler.cube2Done);
-                    }
-                    Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(vecBlockScheduler.vec2Done);
+                    AscendC::GlobalTensor<ElementH> gmVec2Out = vec2Offsets.isFinalState ? gmFinalState : gmH;
+                    EpilogueGDNFwdHUpdate epilogueGDNFwdHUpdate(resource);
+                    epilogueGDNFwdHUpdate(
+                        gmVec2Out[vec2Offsets.hDstOffset],
+                        gmG[vec2Offsets.gOffset],
+                        gmH[vec2Offsets.hSrcOffset],
+                        gmHWorkspaceHalf[vec2Offsets.hWorkOffset],
+                        vec2Offsets.blockTokens, kHeadDim, vHeadDim, vecBlockScheduler.cube2Done
+                    );
+                } else {
+                    Arch::CrossCoreWaitFlag(vecBlockScheduler.cube2Done);
                 }
-                needRun = true;
+                Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(vecBlockScheduler.vec2Done);
             }
 
         }

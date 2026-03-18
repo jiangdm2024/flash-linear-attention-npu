@@ -1,13 +1,3 @@
-/**
- * Copyright (c) 2025 Tianjin University, Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
- * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
-
 #include "catlass/gemm_coord.hpp"
 using namespace Catlass;
 
@@ -65,6 +55,8 @@ struct BlockSchedulerGdnFwdH {
     uint32_t isVariedLen;
     uint32_t shapeBatch;
     uint32_t tokenBatch;
+    bool useInitialState;
+    bool storeFinalState;
 
     uint32_t taskIdx;
     uint32_t taskLoops;
@@ -77,6 +69,7 @@ struct BlockSchedulerGdnFwdH {
     uint32_t totalTokens;
     uint32_t headInnerLoop;
 
+    uint32_t iterId {0};
     bool hasDummyHead;
     bool isRunning;
     bool processNewTask {true};
@@ -125,6 +118,8 @@ struct BlockSchedulerGdnFwdH {
         isVariedLen = gdnFwdHTilingData->isVariedLen;
         shapeBatch = gdnFwdHTilingData->shapeBatch;
         tokenBatch = gdnFwdHTilingData->tokenBatch;
+        useInitialState = gdnFwdHTilingData->useInitialState;
+        storeFinalState = gdnFwdHTilingData->storeFinalState;
 
         gmSeqlen.SetGlobalBuffer((__gm__ int64_t *)cu_seqlens);
         gmNumChunks.SetGlobalBuffer((__gm__ int64_t *)chunk_indices);
@@ -156,7 +151,14 @@ struct BlockSchedulerGdnFwdH {
 
     CATLASS_DEVICE
     void InitTask() {
-        if (unlikely(processNewTask)) {
+        iterId++;
+        currStage = (currStage + 1) % PING_PONG_STAGES;
+        if (processNewTask) {
+            if (taskIdx >= taskNum) {
+                lastLoop = true;
+                isRunning = false;
+                return;
+            }
             vIdx = taskIdx / (batch * vNumHead);
             batchIdx = (taskIdx - vIdx * batch * vNumHead) / vNumHead;
             baseHeadIdx = taskIdx % vNumHead;
@@ -175,15 +177,15 @@ struct BlockSchedulerGdnFwdH {
         
         vHeadIdx = baseHeadIdx + headInnerIdx;
         kHeadIdx = vHeadIdx / headGroups;
+        offsets[currStage].isFinalState = chunkIdx == (batchChunks - 1); 
         offsets[currStage].hSrcOffset = (shapeBatchIdx * vNumHead * totalChunks + vHeadIdx * totalChunks + chunkOffset + chunkIdx) * kHeadDim * vHeadDim;
-        offsets[currStage].hDstOffset = offsets[currStage].hSrcOffset + kHeadDim * vHeadDim;
+        offsets[currStage].hDstOffset = offsets[currStage].isFinalState ? ((batchIdx * vNumHead + vHeadIdx) * kHeadDim * vHeadDim) : (offsets[currStage].hSrcOffset + kHeadDim * vHeadDim);
         offsets[currStage].uvOffset = (shapeBatchIdx * vNumHead * totalTokens + vHeadIdx * totalTokens + tokenOffset + chunkIdx * chunkSize) * vHeadDim;
         offsets[currStage].wkOffset = (shapeBatchIdx * kNumHead * totalTokens + kHeadIdx * totalTokens + tokenOffset + chunkIdx * chunkSize) * kHeadDim;
         offsets[currStage].wOffset = (shapeBatchIdx * vNumHead * totalTokens + vHeadIdx * totalTokens + tokenOffset + chunkIdx * chunkSize) * kHeadDim;
         offsets[currStage].gOffset = shapeBatchIdx * vNumHead * totalTokens + vHeadIdx * totalTokens + tokenOffset + chunkIdx * chunkSize;
         offsets[currStage].hWorkOffset = (cubeCoreIdx * PING_PONG_STAGES + currStage) * kHeadDim * vHeadDim;
         offsets[currStage].vWorkOffset = (cubeCoreIdx * PING_PONG_STAGES + currStage) * chunkSize * vHeadDim;
-        offsets[currStage].isFinalState = chunkIdx == (batchChunks - 1); 
         offsets[currStage].blockTokens = offsets[currStage].isFinalState ? (batchTokens - chunkIdx * chunkSize) : chunkSize;
         offsets[currStage].isDummyHead = headInnerLoop < PING_PONG_STAGES && headInnerIdx >= headInnerLoop; 
         offsets[currStage].batchIdx = batchIdx; 
@@ -191,19 +193,34 @@ struct BlockSchedulerGdnFwdH {
         offsets[currStage].chunkIdx = chunkIdx; 
 
         processNewTask = chunkIdx == batchChunks - 1 && headInnerIdx == PING_PONG_STAGES - 1;
-        if (unlikely(processNewTask)) {
+        if (processNewTask) {
             uint32_t currLoopIdx = taskIdx / (PING_PONG_STAGES * cubeCoreNum);
             headInnerLoop = ((currLoopIdx + 2 == taskLoops) && hasDummyHead) ? 1 : PING_PONG_STAGES;
             taskIdx = (currLoopIdx + 1) * PING_PONG_STAGES * cubeCoreNum + headInnerLoop * cubeCoreIdx;
-            if (unlikely(taskIdx >= taskNum)) {
-                isRunning = false;
-            }
         }
-        
-        currStage = (currStage + 1) % PING_PONG_STAGES;
     }
 
+    CATLASS_DEVICE
+    GDNFwdHOffsets& GetStage1Offsets() {
+        return offsets[currStage];
+    }
+    
+    CATLASS_DEVICE
+    bool NeedProcessStage1() {
+        GDNFwdHOffsets& stage1Offsets = GetStage1Offsets();
+        return !(lastLoop || stage1Offsets.isDummyHead);
+    }
 
+    CATLASS_DEVICE
+    GDNFwdHOffsets& GetStage2Offsets() {
+        return offsets[(currStage - 1) % PING_PONG_STAGES];
+    }
+
+    CATLASS_DEVICE
+    bool NeedProcessStage2() {
+        GDNFwdHOffsets& stage2Offsets = GetStage2Offsets();
+        return !(iterId == 1 || (!storeFinalState && stage2Offsets.isFinalState) || stage2Offsets.isDummyHead);
+    }
 };
 
 struct BlockSchedulerGdnFwdHCube : public BlockSchedulerGdnFwdH {
@@ -215,40 +232,6 @@ struct BlockSchedulerGdnFwdHCube : public BlockSchedulerGdnFwdH {
         BlockSchedulerGdnFwdH::Init(cu_seqlens, chunk_indices, tiling, AscendC::GetBlockIdx(), AscendC::GetBlockNum());
     }
 
-    CATLASS_DEVICE
-    bool NeedProcessCube1() {
-        return true;
-    }
-
-    CATLASS_DEVICE
-    GDNFwdHOffsets& GetCube1Offsets() {
-        return offsets[(currStage - 1) % PING_PONG_STAGES];
-    }
-
-    GemmCoord GetCube1Shape() {
-        GDNFwdHOffsets& cube1Offsets = GetCube1Offsets();
-        return GemmCoord{cube1Offsets.blockTokens, vHeadDim, kHeadDim};
-    }
-
-    CATLASS_DEVICE
-    bool NeedProcessCube2() {
-        if (unlikely(firstLoop)) {
-            firstLoop = false;
-            return false;
-        }
-        return true;
-    }
-
-    CATLASS_DEVICE
-    GDNFwdHOffsets& GetCube2Offsets() {
-        return offsets[(currStage - 2) % PING_PONG_STAGES];
-    }
-
-    GemmCoord GetCube2Shape() {
-        GDNFwdHOffsets& cube2Offsets = GetCube2Offsets();
-        return GemmCoord{kHeadDim, vHeadDim, cube2Offsets.blockTokens};
-    }
-
 };
 
 struct BlockSchedulerGdnFwdHVec : public BlockSchedulerGdnFwdH {
@@ -258,30 +241,6 @@ struct BlockSchedulerGdnFwdHVec : public BlockSchedulerGdnFwdH {
     CATLASS_DEVICE
     void Init(GM_ADDR cu_seqlens, GM_ADDR chunk_indices, GM_ADDR tiling) {
         BlockSchedulerGdnFwdH::Init(cu_seqlens, chunk_indices, tiling, AscendC::GetBlockIdx() / AscendC::GetSubBlockNum(), AscendC::GetBlockNum());
-    }
-
-    CATLASS_DEVICE
-    bool NeedProcessVec1() {
-        return isRunning;
-    }
-
-    CATLASS_DEVICE
-    bool NeedProcessVec2() {
-        if (unlikely(firstLoop)) {
-            firstLoop = false;
-            return false;
-        }
-        return true;
-    }
-
-    CATLASS_DEVICE
-    GDNFwdHOffsets& GetVec1Offsets() {
-        return offsets[(currStage - 1) % PING_PONG_STAGES];
-    }
-    
-    CATLASS_DEVICE
-    GDNFwdHOffsets& GetVec2Offsets() {
-        return offsets[(currStage - 2) % PING_PONG_STAGES];
     }
 
 };
