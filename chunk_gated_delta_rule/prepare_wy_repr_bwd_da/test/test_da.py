@@ -5,6 +5,8 @@ import math
 import ct
 import random
 
+torch.npu.utils.set_device(3)
+
 def prepare_cu_seqlens(T: int, L: int = 32, seed: int = 42) -> list[int]:
     """
     直接生成一个长度为 L 的 cu_seqlens 列表 (list[int])：
@@ -264,27 +266,17 @@ def compute_dA_cpu(
                 b_dA = torch.where(m_A[:chunk_len, :chunk_len], b_dA_7.to(torch.float32), 0.0)
 
                 # 存储结果
-                dA[i_b, i_h, bos : eos, : chunk_len] = b_dA.to(torch.float16)
+                dA[i_b, i_h, bos : eos, : chunk_len] = b_dA.to(A.dtype)
 
     return dA
 
 def test_variable():
-    # B, H, T, K, V = 1, 2, 128, 128, 128
-    # BT=chunk_size=64
-
-    B = 1;
-    T = 2048;
-    H = 4;
-    K = 128;
-    V = 128;
+    B = 1
+    T = 16384
+    H = 32
+    K = 128
+    V = 128
     BT=chunk_size=64
-
-    # B = 1;
-    # T = 32768;
-    # H = 32;
-    # K = 128;
-    # V = 128;
-    # BT=chunk_size=64
 
     k = create_tensor((B, H, T, K), dtype=torch.float16)
     print(f"==== k.shape = {k.shape} ")
@@ -298,16 +290,12 @@ def test_variable():
     print(f"==== dw.shape = {dw.shape} ")
     du = create_tensor((B, H, T, V), dtype=torch.float16)
     print(f"==== du.shape = {du.shape} ")
-    g = create_tensor((B, H, T), dtype=torch.float)
+    # g = create_tensor((B, H, T), dtype=torch.float)
+    g = torch.arange(-1, -(B * H * T + 1), -1).reshape((B, H, T)).to(torch.float)
     print(f"==== g.shape = {g.shape} ")
-
-    # lower_tri_matrix = bool_matrix_lower_tri_to_uint8(chunk_size)
-    # print(f"==== lower_tri_matrix.shape = {lower_tri_matrix.shape}")
-    # print("==== lower_tri_matrix ====")
-    # print(lower_tri_matrix)
+    print(f"==== g = {g} ")
 
     cu_seqlens = prepare_cu_seqlens(T = T, L = 16)
-    # cu_seqlens = k.new_tensor([0, 2, 2048], dtype=torch.long)
     chunk_indices = prepare_chunk_indices(cu_seqlens, chunk_size)
     print(f"==== chunk_indices len = {len(chunk_indices)}, chunk_indices[:20] = {chunk_indices[:20]}")
 
@@ -318,60 +306,46 @@ def test_variable():
     dw_npu = dw.npu()
     du_npu = du.npu()
     g_npu = g.npu()
-    # lower_tri_matrix_npu = lower_tri_matrix.npu()
 
     dA_npu = torch_npu.npu_prepare_wy_repr_bwd_da(k_npu, v_npu, beta_npu, A_npu, dw_npu, du_npu, g_npu, cu_seqlens=cu_seqlens, chunk_indices=chunk_indices, chunk_size=chunk_size)
-    torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/test_dA_var_npu.pt")
-    # torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_var_npu_model_case.pt")
+    torch.save(dA_npu, "/data/yzq/flash-linear-attention-npu-yzq/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/test_dA_var_npu.pt")
     print(f"==== dA_npu.shape = {dA_npu.shape} ")
     print(f"==== dA_npu = {dA_npu} ")
     print(f"==== dA_npu.dtype = {dA_npu.dtype} ")
+    # 测试dA_npu里是否包含nan值
+    print(f"==== dA_npu has NaN: {torch.isnan(dA_npu).any().item()}")
 
     NT = len(chunk_indices) // 2
     print("==== NT = ", NT)
     dA_cpu = compute_dA_cpu(A, dw, g, beta, k, v, du, chunk_indices, cu_seqlens, B, H, T, K, BT, NT)
-    torch.save(dA_cpu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/test_dA_var_cpu.pt")
-    # torch.save(dA_cpu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_var_cpu_model_case.pt")
+    torch.save(dA_cpu, "/data/yzq/flash-linear-attention-npu-yzq/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/test_dA_var_cpu.pt")
 
-    ct.isclose(dA_cpu, dA_npu, diff_thd=0.1)
+    ct.isclose(dA_npu, dA_cpu, diff_thd=0.1)
 
 def test_fix():
-    # B, H, T, K, V = 1, 2, 128, 128, 128
-    # BT=chunk_size=64
-
-    B = 1;
-    T = 2048;
-    H = 4;
-    K = 128;
-    V = 128;
+    B = 1
+    T = 16384
+    H = 32
+    K = 128
+    V = 128
     BT=chunk_size=64
 
-    # B = 1;
-    # T = 32768;
-    # H = 32;
-    # K = 128;
-    # V = 128;
-    # BT=chunk_size=64
-
-    k = create_tensor((B, H, T, K), dtype=torch.float16)
+    k = create_tensor((B, H, T, K), dtype=torch.bfloat16)
     print(f"==== k.shape = {k.shape} ")
-    v = create_tensor((B, H, T, V), dtype=torch.float16)
+    v = create_tensor((B, H, T, V), dtype=torch.bfloat16)
     print(f"==== v.shape = {v.shape} ")
     beta = create_tensor((B, H, T), dtype=torch.float)
     print(f"==== beta.shape = {beta.shape} ")
-    A = create_tensor((B, H, T, BT), dtype=torch.float16)
+    A = create_tensor((B, H, T, BT), dtype=torch.bfloat16)
     print(f"==== A.shape = {A.shape} ")
-    dw = create_tensor((B, H, T, K), dtype=torch.float16)
+    dw = create_tensor((B, H, T, K), dtype=torch.bfloat16)
     print(f"==== dw.shape = {dw.shape} ")
-    du = create_tensor((B, H, T, V), dtype=torch.float16)
+    du = create_tensor((B, H, T, V), dtype=torch.bfloat16)
     print(f"==== du.shape = {du.shape} ")
-    g = create_tensor((B, H, T), dtype=torch.float)
+    # g = create_tensor((B, H, T), dtype=torch.float)
+    g = torch.arange(-1, -(B * H * T + 1), -1).reshape((B, H, T)).to(torch.float)
     print(f"==== g.shape = {g.shape} ")
-
-    # lower_tri_matrix = bool_matrix_lower_tri_to_uint8(chunk_size)
-    # print(f"==== lower_tri_matrix.shape = {lower_tri_matrix.shape}")
-    # print("==== lower_tri_matrix ====")
-    # print(lower_tri_matrix)
+    print(f"==== g = {g} ")
 
     k_npu = k.npu()
     v_npu = v.npu()
@@ -380,24 +354,23 @@ def test_fix():
     dw_npu = dw.npu()
     du_npu = du.npu()
     g_npu = g.npu()
-    # lower_tri_matrix_npu = lower_tri_matrix.npu()
 
     dA_npu = torch_npu.npu_prepare_wy_repr_bwd_da(k_npu, v_npu, beta_npu, A_npu, dw_npu, du_npu, g_npu, cu_seqlens=None, chunk_indices=None, chunk_size=chunk_size)
-    torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/test_dA_npu.pt")
-    # torch.save(dA_npu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_npu_model_case.pt")
-    # print(f"==== dA_npu.shape = {dA_npu.shape} ")
-    # print(f"==== dA_npu = {dA_npu} ")
-    # print(f"==== dA_npu.dtype = {dA_npu.dtype} ")
+    torch.save(dA_npu, "/data/yzq/flash-linear-attention-npu-yzq/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/test_dA_npu.pt")
+    print(f"==== dA_npu.shape = {dA_npu.shape} ")
+    print(f"==== dA_npu = {dA_npu} ")
+    print(f"==== dA_npu.dtype = {dA_npu.dtype} ")
+    # 测试dA_npu里是否包含nan值
+    print(f"==== dA_npu has NaN: {torch.isnan(dA_npu).any().item()}")
 
     chunk_indices = None
     cu_seqlens = None
     NT = (T + BT - 1) // BT
     print("==== NT = ", NT)
     dA_cpu = compute_dA_cpu(A, dw, g, beta, k, v, du, chunk_indices, cu_seqlens, B, H, T, K, BT, NT)
-    torch.save(dA_cpu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/test_dA_cpu.pt")
-    # torch.save(dA_cpu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_cpu_model_case.pt")
+    torch.save(dA_cpu, "/data/yzq/flash-linear-attention-npu-yzq/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/test_dA_cpu.pt")
 
-    ct.isclose(dA_cpu, dA_npu, diff_thd=0.1)
+    ct.isclose(dA_npu, dA_cpu, diff_thd=0.1)
 
 def create_tensor(shape, dtype=torch.float16):
 

@@ -577,13 +577,6 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
                     DataCopy(tensorGAllFp32, tensorGAllIn, BT);
                 }
                 PipeBarrier<PIPE_V>();
-                // tensorGAllFp32 * -1
-                Muls(tensorGAllFp32, tensorGAllFp32, float(-1.0), BT);
-                PipeBarrier<PIPE_V>();
-                // exp neg tensorGAllFp32 EXP(-g[1, BT])
-                Exp(tensorGAllFp32, tensorGAllFp32, BT);
-                PipeBarrier<PIPE_V>();
-                // repeat rowNum行 gFactorLocalTensor = EXP(-g[rowNum, BT])
                 Copy(gFactorLocalTensor, tensorGAllFp32, CAL_NUM_FLOAT, rowNum, {1, 1, 8, 0});
                 gAllInQue.FreeTensor(tensorGAllIn);
             }
@@ -623,20 +616,26 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
                     Cast(tensorDA6Fp32, tensorDA6In, RoundMode::CAST_NONE, curRowNum * BT);
                     PipeBarrier<PIPE_V>();
 
-                    // exp tensorGFp32 EXP(g[rowNum, 1])
-                    Exp(tensorGFp32, tensorGFp32, curRowNum);
-                    PipeBarrier<PIPE_V>();
-
                     Brcb(brcbLocalTensor, tensorGFp32, static_cast<uint8_t>(CeilDiv(curRowNum, 8)), {1, 8});
                     PipeBarrier<PIPE_V>();
 
-                    // 计算 gFactor = exp(-g[None, :]) * exp(g[:, None])
+                    // 计算 g[:, None] - g[None, :]
                     uint64_t perchannelResOffset = 0;
                     uint8_t repeatStride = BT * sizeof(float32_t) / ONE_BLOCK_32;
                     while (perchannelResOffset < BT) {
-                        Mul(gFactorLocalTensor[perchannelResOffset], gFactorLocalTensor[perchannelResOffset], brcbLocalTensor,
-                            FP32_PER_REPEAT_64, curRowNum, {1, 1, 0, repeatStride, repeatStride, 1});
+                        Sub(gFactorLocalTensor[perchannelResOffset], brcbLocalTensor, gFactorLocalTensor[perchannelResOffset],
+                            FP32_PER_REPEAT_64, curRowNum, {1, 0, 1, repeatStride, 1, repeatStride});
                         perchannelResOffset += FP32_PER_REPEAT_64;
+                    }
+                    PipeBarrier<PIPE_V>();
+
+                    // 计算 gFactor = exp(g[:, None] - g[None, :])
+                    for (uint32_t idx = 0; idx < (curRowNum * BT + CAL_NUM_FLOAT - 1) / CAL_NUM_FLOAT; idx++) {
+                        uint32_t curSize = (idx + 1) * CAL_NUM_FLOAT <= curRowNum * BT ? 
+                                           CAL_NUM_FLOAT : curRowNum * BT - idx * CAL_NUM_FLOAT;
+                        AscendC::Exp(gFactorLocalTensor[idx * CAL_NUM_FLOAT], 
+                                     gFactorLocalTensor[idx * CAL_NUM_FLOAT], 
+                                     curSize, 1, {1, 1, repeatStride, repeatStride});
                     }
                     PipeBarrier<PIPE_V>();
 
