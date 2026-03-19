@@ -291,8 +291,9 @@ public:
                     auto tensorK = tla::MakeTensor(gmK, MakeLayoutFromTag(layoutKxBT), Arch::PositionGM{});  // k^T
                     auto tensorMm5 = tla::MakeTensor(gmMm5, MakeLayoutFromTag(layoutBTxBT), Arch::PositionGM{});
                     // AscendC::PipeBarrier<PIPE_MTE2>();
+#if 0
                     AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
-
+#endif
                     auto tensorBlockQ = GetTile(tensorQ, tla::MakeCoord(0, 0), 
                                                  tla::MakeShape(actualBlockShape.m(), actualBlockShape.k()));
                     auto tensorBlockK = GetTile(tensorK, tla::MakeCoord(0, 0), 
@@ -301,13 +302,15 @@ public:
                                                    tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
                     
                     blockMmadPart2(tensorBlockQ, tensorBlockK, tensorBlockMm5, actualBlockShape);
+#if 0
                     AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_0);
-
+#endif
                 }
             }
-            
+#if 0
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
+#endif
         }
         AscendC::SyncAll<false>();
 
@@ -545,7 +548,11 @@ public:
                                                   tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
                     
                     blockMmadPart6(tensorBlockDsTemp, tensorBlockK, tensorBlockDq, actualBlockShape);
-
+// if(h==0&&loopIdx==7){
+//     DumpTensor(gmDsTemp[63*64],__LINE__,64);
+//     DumpTensor(gmK[63*128],__LINE__,64);
+//     DumpTensor(gmDq[63*128],__LINE__,64);
+// }
                     AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_0);
                 }
             }

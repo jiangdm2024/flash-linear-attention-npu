@@ -203,9 +203,11 @@ def chunk_bwd_dqkwg_cpu(
                     dg_last_accum = dg_last_accum * torch.exp(g_last)
                     # Apply decay to state contributions
 
-
+                    # print("dq_from_state before",dq_from_state)
+                    # print("g_c",g_c)
+                    # print("torch.exp(g_c)[:, None]",torch.exp(g_c)[:, None])
                     dq_from_state = dq_from_state * torch.exp(g_c)[:, None] * scale
-
+                    
 
 
                     # print("-g_c ", -g_c)
@@ -269,8 +271,13 @@ def chunk_bwd_dqkwg_cpu(
                     # Decay: exp(g[i] - g[j])
 
                     decay_mat = torch.exp(g_c[:, None] - g_c[None, :])
+                    # if h_idx == 0 and i_t == 7:
+                    #     print("g_c[:, None] - g_c[None, :]", g_c[:, None] - g_c[None, :])
+                    #     print("decay_mat = torch.exp(g_c[:, None] - g_c[None, :])", decay_mat)
 
                     ds = torch.where(mask, ds * decay_mat, torch.zeros_like(ds)) * scale
+                    # print("decay_mat",decay_mat)
+                    # print("ds",ds)
 
                     
                     # DG Calculation Part 2 (Intra-chunk)
@@ -308,12 +315,14 @@ def chunk_bwd_dqkwg_cpu(
                     #     print(f"dg_c[{actual_chunk_len - 1}] += {dg_last_accum}")
                     # print("dg_c", dg_c)
                     dg[b_idx, chunk_start_token_idx:chunk_end_token_idx, h_idx] = dg_c
-
+                    # print("dg_c",dg_c)
 
                 elif g_gamma is not None:
 
                     decay_mat = torch.exp(g_c[:, None] - g_c[None, :])
+                    
                     ds = torch.where(mask, ds * decay_mat, torch.zeros_like(ds)) * scale
+
                 else:
                     ds = torch.where(mask, ds, torch.zeros_like(ds))
                     # 在 else 分支，triton 代码: b_dq *= scale (最后)
@@ -330,8 +339,9 @@ def chunk_bwd_dqkwg_cpu(
                 # dq += ds @ k
 
                 dq_intra = ds.to(torch.float32) @ k_c.to(torch.float32)
-                # print("ds.to(torch.float32)",ds.to(torch.float32))
-                # print("k_c.to(torch.float32)",k_c.to(torch.float32))
+                # if h_idx == 0 and i_t == 7:
+                #     print("ds.to(torch.float32)",ds.to(torch.float32))
+                #     print("k_c.to(torch.float32)",k_c.to(torch.float32))
                 dq_intra = dq_intra.to(datatype).to(torch.float32)
                 # dk += ds.T @ q
                 dk_intra = ds.transpose(-1, -2).to(torch.float32) @ q_c.to(torch.float32)
@@ -345,14 +355,26 @@ def chunk_bwd_dqkwg_cpu(
                     dk_total = dk_from_state + dk_intra
                 else:
                     dq_total = dq_from_state + dq_intra
+                    # if h_idx == 0 and i_t == 7:
+                    #     print("dq_from_state",dq_from_state[-1])
+                    #     print("dq_intra",dq_intra[-1])
+                    #     print("dq_total",dq_total.shape,dq_total[-1])
                     dk_total = dk_from_state + dk_intra
+
+                    # print(h_idx,i_t,"dk_from_state",dk_from_state)
+                    # print(h_idx,i_t,"dk_intra",dk_intra)
+                    # print(h_idx,i_t,"dk_total",dk_total)
 
 
                 dq[b_idx, chunk_start_token_idx:chunk_end_token_idx, h_idx, :] = dq_total
                 dk[b_idx, chunk_start_token_idx:chunk_end_token_idx, h_idx, :] = dk_total
-                if REGIN == False:
+
+                if RANDOM_DATA == False:
                     pass
-                    pause()
+                    if h_idx == 0 and i_t == 7:
+                        pass
+                        # pause()
+                # exit()
 
     # Main Loop
     if cu_seqlens is None:
@@ -403,21 +425,14 @@ def chunk_bwd_dqkwg_cpu(
 # 使用示例 / 验证
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
-    REGIN=True
-    save_path = "/data/huangjunzhe/GDN/result/result/case_21"
+    RANDOM_DATA = True
     case_number = 21
     if len(sys.argv) > 1:
         regen = sys.argv[1]
-        if regen == "regen":
+        if regen == "random":
             print("[test.py] regenerate all random data!")
-            REGIN=True
-    if len(sys.argv) > 2:
-        print(f"[test.py] save_path: {sys.argv[2]}")
-        save_path = sys.argv[2]
-    if len(sys.argv) > 3:
-        result = sys.argv[3][5:]  # "case_" 长度为5
-        case_number = int(result)
-        print(f"[test.py] case id: {case_number}")
+            RANDOM_DATA=True
+
     # 简单的形状参数
     K, V = 128, 128
     calc_type = torch.float32
@@ -444,8 +459,10 @@ if __name__ == "__main__":
         [1,8,65536,64,torch.bfloat16,torch.bfloat16,0.0625,torch.tensor([0,16,20000,65536])],
         [1,32,65536,64,torch.float16,torch.float32,0.0442,torch.tensor([0,16,20000,50000,65536])],
         [1,32,262144,64,torch.bfloat16,torch.bfloat16,0.03125,torch.tensor([0,16,20000,50000,65536,210000,262144])],
-        [1,2,128,64,torch.float16,torch.float16,0.088,[0,16,128]],  #21 [0,16,128]
+        [2,4,512,64,torch.bfloat16,torch.float32,0.088,None],  #21 [0,16,128] [0,16,135,512]
+        [1,32,16384,64,torch.bfloat16,torch.float32,0.088,None],  #21 [0,16,128]
     ]
+    device_id = 5
     
 
     dtype = torch.float16
@@ -484,19 +501,51 @@ if __name__ == "__main__":
         chunk_indices = None
         num_chunks = T // chunk_size
     
-    q = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 # std≈5e-6#torch.randn([B, T, H, K], dtype=dtype)
-    k = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, K], dtype=dtype)
-    v = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 1000000  # torch.randn([B, T, H, V], dtype=dtype)
+    test_case_name = "test"
+    data_path = "/data/huangjunzhe/GDN/data/"
+    if RANDOM_DATA:
+        q = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 # std≈5e-6#torch.randn([B, T, H, K], dtype=dtype)
+        k = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, K], dtype=dtype)
+        v = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 10000  # torch.randn([B, T, H, V], dtype=dtype)
 
-    g = torch.randn(B,T,H, dtype=dtype, requires_grad=True) * 5e-2  # torch.randn([B, T, H], dtype=Gtype)
-    do = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, V], dtype=dtype)
+        # g = torch.randn(B,T,H, dtype=dtype, requires_grad=True) * 5e-2   # torch.randn([B, T, H], dtype=Gtype)
+        g = -torch.sort(torch.rand(B*T*H) * 100, descending=False)[0].reshape((B,T,H)).to(Gtype)    #G必须递减且为负数
+        # print("g",g)
+        do = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, V], dtype=dtype)
 
-    dv = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 1000000  # torch.randn([B, T, H, V], dtype=dtype)
-    w = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, K], dtype=dtype)
+        dv = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 1000000  # torch.randn([B, T, H, V], dtype=dtype)
+        w = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, K], dtype=dtype)
 
-    h = torch.randn(B, num_chunks, H, K, V, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
-    dh = torch.randn(B, num_chunks, H, K, V, dtype=dtype, requires_grad=True) * 5e-7 * 100000 # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
-
+        h = torch.randn(B, num_chunks, H, K, V, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
+        dh = torch.randn(B, num_chunks, H, K, V, dtype=dtype, requires_grad=True) * 5e-7 * 1000 # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
+        torch.save(q, f"{data_path}/{test_case_name}/in/q_cpu.pt")
+        torch.save(k, f"{data_path}/{test_case_name}/in/k_cpu.pt")
+        torch.save(v, f"{data_path}/{test_case_name}/in/v_cpu.pt")
+        torch.save(g, f"{data_path}/{test_case_name}/in/g_cpu.pt")
+        torch.save(do, f"{data_path}/{test_case_name}/in/do_cpu.pt")
+        torch.save(dv, f"{data_path}/{test_case_name}/in/dv_cpu.pt")
+        torch.save(w, f"{data_path}/{test_case_name}/in/w_cpu.pt")
+        torch.save(h, f"{data_path}/{test_case_name}/in/h_cpu.pt")
+        torch.save(dh, f"{data_path}/{test_case_name}/in/dh_cpu.pt")
+    else:
+        # q=torch.load("/home/huangjunzhe/GDN/data/model/after_cpu/q_cpu.pt", weights_only=False)
+        # k=torch.load("/home/huangjunzhe/GDN/data/model/after_cpu/k_cpu.pt", weights_only=False)
+        # v=torch.load("/home/huangjunzhe/GDN/data/model/after_cpu/v_new_cpu.pt", weights_only=False)
+        # w=torch.empty_like(q)
+        # g=torch.load("/home/huangjunzhe/GDN/data/model/after_cpu/g_cpu.pt", weights_only=False)
+        # h=torch.load("/home/huangjunzhe/GDN/data/model/after_cpu/h_cpu.pt", weights_only=False)
+        # dv=torch.load("/home/huangjunzhe/GDN/data/model/after_cpu/dv_cpu.pt", weights_only=False)
+        # do=torch.load("/home/huangjunzhe/GDN/data/model/after_cpu/do_cpu.pt", weights_only=False)
+        # dh=torch.load("/home/huangjunzhe/GDN/data/model/after_cpu/dh_cpu.pt", weights_only=False)
+        q=torch.load(f"{data_path}/{test_case_name}/in/q_cpu.pt", weights_only=False)
+        k=torch.load(f"{data_path}/{test_case_name}/in/k_cpu.pt", weights_only=False)
+        v=torch.load(f"{data_path}/{test_case_name}/in/v_cpu.pt", weights_only=False)
+        w=torch.empty_like(q)
+        g=torch.load(f"{data_path}/{test_case_name}/in/g_cpu.pt", weights_only=False)
+        h=torch.load(f"{data_path}/{test_case_name}/in/h_cpu.pt", weights_only=False)
+        dv=torch.load(f"{data_path}/{test_case_name}/in/dv_cpu.pt", weights_only=False)
+        do=torch.load(f"{data_path}/{test_case_name}/in/do_cpu.pt", weights_only=False)
+        dh=torch.load(f"{data_path}/{test_case_name}/in/dh_cpu.pt", weights_only=False)
     q = q.to(dtype).to(calc_type)
     k = k.to(dtype).to(calc_type)
     v = v.to(dtype).to(calc_type)
@@ -524,15 +573,9 @@ if __name__ == "__main__":
     print(f"scale: {scale}")
     print(f"chunk_size: {chunk_size}")
 
-    dq, dk, dw, dg = chunk_bwd_dqkwg_cpu(
-        q, k, v, do, h, dh, w, g, dv, scale, cu_seqlens_torch, chunk_size
-    )
-    dq = dq.to(dtype)
-    dk = dk.to(dtype)
-    dw = dw.to(dtype)
-    dg = dg.to(Gtype)
+
     print("==============start NPU=============")
-    torch_npu.npu.set_device(1)
+    torch_npu.npu.set_device(device_id)
     q_npu = torch.transpose(q, 1, 2).to(dtype).npu()
     k_npu = torch.transpose(k, 1, 2).to(dtype).npu()
     v_npu = torch.transpose(v, 1, 2).to(dtype).npu()
@@ -548,16 +591,37 @@ if __name__ == "__main__":
     dq_npu, dk_npu, dw_npu, dg_npu = torch_npu.npu_chunk_bwd_dqkwg(
         q_npu, k_npu, v_npu, g_npu, h_npu, do_npu, dh_npu, dv_npu, cu_seqlens, chunk_indices_npu, scale, chunk_size
     )
-    dq_npu = torch.transpose(dq_npu, 1, 2).cpu()
-    dk_npu = torch.transpose(dk_npu, 1, 2).cpu()
-    dw_npu = torch.transpose(dw_npu, 1, 2).cpu()
-    dg_npu = torch.transpose(dg_npu, 1, 2).cpu()
+    dq_npu = dq_npu.cpu()
+    dk_npu = dk_npu.cpu()
+    dw_npu = dw_npu.cpu()
+    dg_npu = dg_npu.cpu()
 
     # print("Output shapes:", dq.shape, dk.shape, dg.shape, dw.shape)
     print("dq_npu", dq_npu.shape, dq_npu.dtype)
     print("dk_npu", dk_npu.shape, dk_npu.dtype)
     print("dw_npu", dw_npu.shape, dw_npu.dtype)
     print("dg_npu", dg_npu.shape, dg_npu.dtype)
+
+    # print("dq_npu[0][0][-1]", dq_npu[0][0][-1])
+
+    print("=====start cpu=========")
+
+
+    dq, dk, dw, dg = chunk_bwd_dqkwg_cpu(
+        q, k, v, do, h, dh, w, g, dv, scale, cu_seqlens_torch, chunk_size
+    )
+    # dq = dq.to(dtype)
+    # dk = dk.to(dtype)
+    # dw = dw.to(dtype)
+    # dg = dg.to(Gtype)
+    dq = torch.transpose(dq, 1, 2).cpu()
+    dk = torch.transpose(dk, 1, 2).cpu()
+    dw = torch.transpose(dw, 1, 2).cpu()
+    dg = torch.transpose(dg, 1, 2).cpu()
+    # print("dq[0][0][-1]", dq[0][0][-1])
+    # print("dk", dk)
+    # print("dw", dw)
+    # print("dg", dg)
 
     print("dq", dq.cpu().shape, dq.cpu().dtype)
     print("dk", dk.cpu().shape, dk.cpu().dtype)
@@ -569,3 +633,14 @@ if __name__ == "__main__":
     single(dk_npu,dk,calc_count=100000,dtype=type_dict[dtype])
     single(dw_npu,dw,calc_count=100000,dtype=type_dict[dtype])
     single(dg_npu,dg,calc_count=100000,dtype=type_dict[Gtype])
+
+    if RANDOM_DATA:
+        torch.save(dq,f"{data_path}/{test_case_name}/out/dq_cpu.pt")
+        torch.save(dk,f"{data_path}/{test_case_name}/out/dk_cpu.pt")
+        torch.save(dw,f"{data_path}/{test_case_name}/out/dw_cpu.pt")
+        torch.save(dg,f"{data_path}/{test_case_name}/out/dg_cpu.pt")
+
+    torch.save(dq_npu,f"{data_path}/{test_case_name}/out/dq_npu.pt")
+    torch.save(dk_npu,f"{data_path}/{test_case_name}/out/dk_npu.pt")
+    torch.save(dw_npu,f"{data_path}/{test_case_name}/out/dw_npu.pt")
+    torch.save(dg_npu,f"{data_path}/{test_case_name}/out/dg_npu.pt")
