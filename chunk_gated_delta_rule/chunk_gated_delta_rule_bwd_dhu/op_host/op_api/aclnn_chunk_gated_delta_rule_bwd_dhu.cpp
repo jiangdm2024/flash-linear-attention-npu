@@ -63,7 +63,6 @@ static aclnnStatus CheckNotNull(ChunkGatedDeltaRuleBwdDhuParams params)
     CHECK_COND(params.dv != nullptr, ACLNN_ERR_PARAM_NULLPTR, "dv must not be nullptr.");
 
     CHECK_COND(params.dhOut != nullptr, ACLNN_ERR_PARAM_NULLPTR, "dhOut must not be nullptr.");
-    CHECK_COND(params.dh0Out != nullptr, ACLNN_ERR_PARAM_NULLPTR, "dh0Out must not be nullptr.");
     CHECK_COND(params.dv2Out != nullptr, ACLNN_ERR_PARAM_NULLPTR, "dv2Out must not be nullptr.");
     return ACLNN_SUCCESS;
 }
@@ -115,8 +114,10 @@ static aclnnStatus ParamsDataContiguous(ChunkGatedDeltaRuleBwdDhuParams &params,
     }
     CHECK_COND(DataContiguous(params.dhOut, executorPtr) == ACLNN_SUCCESS, ACLNN_ERR_PARAM_INVALID,
                "Contiguous dhOut failed.");
-    CHECK_COND(DataContiguous(params.dh0Out, executorPtr) == ACLNN_SUCCESS, ACLNN_ERR_PARAM_INVALID,
-               "Contiguous dh0Out failed.");
+    if (params.dh0Out != nullptr) {
+        CHECK_COND(DataContiguous(params.dh0Out, executorPtr) == ACLNN_SUCCESS, ACLNN_ERR_PARAM_INVALID,
+                   "Contiguous dh0Out failed.");
+    }
     CHECK_COND(DataContiguous(params.dv2Out, executorPtr) == ACLNN_SUCCESS, ACLNN_ERR_PARAM_INVALID,
                "Contiguous dv2Out failed.");
 
@@ -172,18 +173,10 @@ aclnnStatus aclnnChunkGatedDeltaRuleBwdDhuGetWorkspaceSize(
                "ParamsDataContiguous failed.");
     auto result = l0op::ChunkGatedDeltaRuleBwdDhu(params.q, params.k, params.w, params.dO, params.dv, params.gOptional, params.gkOptional, params.h0Optional, params.dhtOptional, params.cuSeqlensOptional, params.chunkIndicesOptional, params.scale, params.chunkSize, params.dhOut, params.dh0Out, params.dv2Out, executorPtr);
     CHECK_RET(result[0] != nullptr, ACLNN_ERR_PARAM_NULLPTR);
-    CHECK_RET(result[1] != nullptr, ACLNN_ERR_PARAM_NULLPTR);
+    if (params.dh0Out != nullptr) {
+        CHECK_RET(result[1] != nullptr, ACLNN_ERR_PARAM_NULLPTR);
+    }
     CHECK_RET(result[2] != nullptr, ACLNN_ERR_PARAM_NULLPTR);
-
-    auto viewCopyResult = l0op::ViewCopy(result[0], params.dhOut, executorPtr);
-    CHECK_RET(viewCopyResult != nullptr, ACLNN_ERR_INNER_NULLPTR);
-
-    viewCopyResult = l0op::ViewCopy(result[1], params.dh0Out, executorPtr);
-    CHECK_RET(viewCopyResult != nullptr, ACLNN_ERR_INNER_NULLPTR);
-
-    viewCopyResult = l0op::ViewCopy(result[2], params.dv2Out, executorPtr);
-    CHECK_RET(viewCopyResult != nullptr, ACLNN_ERR_INNER_NULLPTR);
-
     *workspaceSize = uniqueExecutor->GetWorkspaceSize();
     uniqueExecutor.ReleaseTo(executor);
     return ACLNN_SUCCESS;

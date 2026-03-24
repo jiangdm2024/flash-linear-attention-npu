@@ -40,7 +40,6 @@ const std::array<const aclTensor *, 3> ChunkGatedDeltaRuleBwdDhu(
     L0_DFX(ChunkGatedDeltaRuleBwdDhu, q, k, w, dO, dv, gOptional, gkOptional, h0Optional, dhtOptional, cuSeqlensOptional, chunkIndicesOptional, scale, chunkSize, dhOut, dh0Out, dv2Out);
     
     const aclTensor *actualCuSeqQLen = nullptr;
-    printf("cuSeqlensOptional is %p\n", cuSeqlensOptional); 
     if (cuSeqlensOptional != nullptr) {
         actualCuSeqQLen = executor->ConvertToTensor(cuSeqlensOptional, DataType::DT_INT64);
         const_cast<aclTensor *>(actualCuSeqQLen)->SetStorageFormat(Format::FORMAT_ND);
@@ -51,7 +50,6 @@ const std::array<const aclTensor *, 3> ChunkGatedDeltaRuleBwdDhu(
     }
 
     const aclTensor *actualChunkIndices = nullptr;
-    printf("cuseqlens is %p\n", chunkIndicesOptional); 
     if (chunkIndicesOptional != nullptr) {
         actualChunkIndices = executor->ConvertToTensor(chunkIndicesOptional, DataType::DT_INT64);
         const_cast<aclTensor *>(actualChunkIndices)->SetStorageFormat(Format::FORMAT_ND);
@@ -61,15 +59,24 @@ const std::array<const aclTensor *, 3> ChunkGatedDeltaRuleBwdDhu(
         actualChunkIndices = nullptr;
     }
 
+    const aclTensor* dh0OutKernel = nullptr;
+    if (dh0Out == nullptr) {
+        op::Shape zeroShape;
+        zeroShape.AppendDim(0);
+        dh0OutKernel = executor->AllocTensor(zeroShape, q->GetDataType(), op::Format::FORMAT_ND);
+    } else {
+        dh0OutKernel = dh0Out;
+    }
+
     auto ret = ADD_TO_LAUNCHER_LIST_AICORE(ChunkGatedDeltaRuleBwdDhu,
         OP_INPUT(q, k, w, dO, dv, gOptional, gkOptional, h0Optional, dhtOptional, actualCuSeqQLen, actualChunkIndices),
-        OP_OUTPUT(dhOut, dh0Out, dv2Out),
+        OP_OUTPUT(dhOut, dh0OutKernel, dv2Out),
         OP_ATTR(scale, chunkSize));
     if (ret != ACLNN_SUCCESS) {
         OP_LOGE(ACLNN_ERR_PARAM_INVALID, "ADD_TO_LAUNCHER_LIST_AICORE failed.");
         return {nullptr, nullptr, nullptr};
     }
-    return {dhOut, dh0Out, dv2Out};
+    return {dhOut, dh0OutKernel, dv2Out};
 }
 
 } // namespace l0op

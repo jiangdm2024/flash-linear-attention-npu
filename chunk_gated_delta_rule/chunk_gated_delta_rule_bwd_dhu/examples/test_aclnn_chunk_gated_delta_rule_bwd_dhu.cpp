@@ -235,8 +235,6 @@ int main() {
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   ret = CreateAclTensor(dhHostData, dhShape, &dhDeviceAddr, aclDataType::ACL_FLOAT16, &dh);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
-  ret = CreateAclTensor(dh0HostData, dh0Shape, &dh0DeviceAddr, aclDataType::ACL_FLOAT16, &dh0);
-  CHECK_RET(ret == ACL_SUCCESS, return ret);
   // 3. 调用CANN算子库API，需要修改为具体的Api名称
   uint64_t workspaceSize = 1024 * 1024 * 1024;
   aclOpExecutor *executor;
@@ -283,7 +281,6 @@ int main() {
   aclDestroyIntArray(chunkIndices);
   aclDestroyTensor(dv2);
   aclDestroyTensor(dh);
-  aclDestroyTensor(dh0);
 
   // 7. 释放device资源
   aclrtFree(qDeviceAddr);
