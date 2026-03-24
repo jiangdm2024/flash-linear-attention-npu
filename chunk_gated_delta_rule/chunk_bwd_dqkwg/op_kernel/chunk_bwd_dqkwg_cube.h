@@ -239,6 +239,8 @@ public:
             // 最终同步(后移)
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
         }
         AscendC::SyncAll<false>();
 

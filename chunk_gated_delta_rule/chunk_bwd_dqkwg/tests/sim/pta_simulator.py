@@ -1,18 +1,22 @@
 import torch
 import torch_npu
+
+
+
 import os
 from ct import single
 import torch
 import torch.nn.functional as F
 from typing import Tuple
-from typing import Optional
-import pickle
-import math
-import sys
 
 def pause():
     print("pause")
     input()
+
+from typing import Optional
+import pickle
+import math
+import sys
 
 def prepare_lens(cu_seqlens: torch.LongTensor) -> torch.LongTensor:
     return cu_seqlens[1:] - cu_seqlens[:-1]
@@ -421,7 +425,7 @@ def chunk_bwd_dqkwg_cpu(
 # 使用示例 / 验证
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
-    RANDOM_DATA = False
+    RANDOM_DATA = True
     case_number = 21
     if len(sys.argv) > 1:
         regen = sys.argv[1]
@@ -455,10 +459,10 @@ if __name__ == "__main__":
         [1,8,65536,64,torch.bfloat16,torch.bfloat16,0.0625,torch.tensor([0,16,20000,65536])],
         [1,32,65536,64,torch.float16,torch.float32,0.0442,torch.tensor([0,16,20000,50000,65536])],
         [1,32,262144,64,torch.bfloat16,torch.bfloat16,0.03125,torch.tensor([0,16,20000,50000,65536,210000,262144])],
-        [2,4,512,128,torch.bfloat16,torch.float32,0.88,None],  #21 [0,16,128] [0,16,135,512]
+        [2,4,2048,64,torch.bfloat16,torch.float32,0.088,None],  #21 [0,16,128] [0,16,135,512]
         [1,32,16384,64,torch.bfloat16,torch.float32,0.088,None],  #21 [0,16,128]
     ]
-    device_id = 4
+    device_id = 5
     
 
     dtype = torch.float16
@@ -498,14 +502,14 @@ if __name__ == "__main__":
         num_chunks = T // chunk_size
     
     test_case_name = "test"
-    data_path = "/data/huangjunzhe/GDN/data/"
-    RUN_CPU = True
-    SAVE_FILES = True
+    data_path = "/home/huangjunzhe/GDN/data/"
+    RUN_CPU = False
+    SAVE_FILES = False
     if SAVE_FILES:
         os.makedirs(f'{data_path}/{test_case_name}/in/', exist_ok=True)
         os.makedirs(f'{data_path}/{test_case_name}/out/', exist_ok=True)
     if RANDOM_DATA:
-        q = torch.randn(B,H,T,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000 # std≈5e-6#torch.randn([B, T, H, K], dtype=dtype)
+        q = torch.randn(B,H,T,K, dtype=dtype, requires_grad=True) * 5e-7 * 1000 # std≈5e-6#torch.randn([B, T, H, K], dtype=dtype)
         k = torch.randn(B,H,T,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, K], dtype=dtype)
         v = torch.randn(B,H,T,V, dtype=dtype, requires_grad=True) * 5e-7 * 10000  # torch.randn([B, T, H, V], dtype=dtype)
 

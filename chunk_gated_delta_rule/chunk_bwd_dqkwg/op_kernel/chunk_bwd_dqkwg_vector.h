@@ -279,8 +279,8 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart1
             // ========== 计算 dg_last = sum(h * dh) ==========
             float dg_last_sum = 0.0f;
             // 等待 Cube 信号 (dw Cube 计算)
-            
 
+            
             // CopyIn: h 和 dh
             {
                 auto tensorHIn = inQue1.AllocTensor<DataType>();
@@ -362,7 +362,7 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart1
                 auto tensorDwIn = inQue2.DeQue<DataType>();
                 auto tensorCalcDw = tensorDwIn.template ReinterpretCast<float>();
                 auto tensorDwOut = outQue2.AllocTensor<DataType>();
-                
+
                 // Cast to fp32, 乘以 -1, cast back
                 Cast(tensorCalcDw, tensorDwIn[dwSize_sub], RoundMode::CAST_NONE, dwSize_sub);
                 PipeBarrier<PIPE_V>();

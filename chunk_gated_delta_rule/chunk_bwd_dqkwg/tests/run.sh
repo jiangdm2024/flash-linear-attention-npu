@@ -1,7 +1,7 @@
 # source /root/data_nvme0n1/huangjunzhe/Ascend/ascend-toolkit/set_env.sh
 ascend_path="/data/zs/run/Ascend/cann-9.0.0/"
 # ascend_path="/data/huangjunzhe/Ascend/cann-9.0.0"
-test_script_path=/data/huangjunzhe/GDN/github/flash-linear-attention-npu/chunk_gated_delta_rule/chunk_bwd_dqkwg/tests
+test_script_path=/data/huangjunzhe/GDN/perf/flash-linear-attention-npu/chunk_gated_delta_rule/chunk_bwd_dqkwg/tests
 export TMPDIR=/data/huangjunzhe/tmp
 
 
