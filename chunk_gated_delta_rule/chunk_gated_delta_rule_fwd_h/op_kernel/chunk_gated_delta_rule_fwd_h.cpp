@@ -48,6 +48,7 @@ extern "C" __global__ __aicore__ void chunk_gated_delta_rule_fwd_h(GM_ADDR k, GM
         using GType = Gemm::GemmType<float, layout::RowMajor>;
         using UType = Gemm::GemmType<half, layout::RowMajor>;
         using HType = Gemm::GemmType<half, layout::RowMajor>;
+        using FinalStateType = Gemm::GemmType<float, layout::RowMajor>;
 
         // cube 1
         using TileCopyWH = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, half, layout::RowMajor, half, layout::RowMajor, half, layout::RowMajor>;
@@ -63,7 +64,7 @@ extern "C" __global__ __aicore__ void chunk_gated_delta_rule_fwd_h(GM_ADDR k, GM
 
         // vec 2
         using DispatchPolicyGDNFwdHUpdate = Epilogue::EpilogueAtlasA2GDNFwdHUpdate;
-        using EpilogueGDNFwdHUpdate = Epilogue::Block::BlockEpilogue<DispatchPolicyGDNFwdHUpdate, HType, GType, HType, HworkType>;
+        using EpilogueGDNFwdHUpdate = Epilogue::Block::BlockEpilogue<DispatchPolicyGDNFwdHUpdate, HType, GType, HType, HworkType, FinalStateType>;
 
         using GDNFwdHKernel = Catlass::Gemm::Kernel::GDNFwdHKernel<CubeScheduler, VecScheduler, BlockMmadWH, BlockMmadKV, EpilogueGDNFwdHVnew, EpilogueGDNFwdHUpdate>;
 
@@ -90,6 +91,7 @@ extern "C" __global__ __aicore__ void chunk_gated_delta_rule_fwd_h(GM_ADDR k, GM
         using GType = Gemm::GemmType<float, layout::RowMajor>;
         using UType = Gemm::GemmType<bfloat16_t, layout::RowMajor>;
         using HType = Gemm::GemmType<bfloat16_t, layout::RowMajor>;
+        using FinalStateType = Gemm::GemmType<float, layout::RowMajor>;
 
         // cube 1
         using TileCopyWH = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, bfloat16_t, layout::RowMajor, bfloat16_t, layout::RowMajor, half, layout::RowMajor>;
@@ -105,7 +107,7 @@ extern "C" __global__ __aicore__ void chunk_gated_delta_rule_fwd_h(GM_ADDR k, GM
 
         // vec 2
         using DispatchPolicyGDNFwdHUpdate = Epilogue::EpilogueAtlasA2GDNFwdHUpdate;
-        using EpilogueGDNFwdHUpdate = Epilogue::Block::BlockEpilogue<DispatchPolicyGDNFwdHUpdate, HType, GType, HType, HworkType>;
+        using EpilogueGDNFwdHUpdate = Epilogue::Block::BlockEpilogue<DispatchPolicyGDNFwdHUpdate, HType, GType, HType, HworkType, FinalStateType>;
 
         using GDNFwdHKernel = Catlass::Gemm::Kernel::GDNFwdHKernel<CubeScheduler, VecScheduler, BlockMmadWH, BlockMmadKV, EpilogueGDNFwdHVnew, EpilogueGDNFwdHUpdate>;
 

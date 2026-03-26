@@ -13,14 +13,16 @@ template <
     class HOutputType_,
     class GInputType_,
     class HInputType_,
-    class HUpdateInputType_
+    class HUpdateInputType_,
+    class FinalStateType_
 >
 class BlockEpilogue <
     EpilogueAtlasA2GDNFwdHUpdate,
     HOutputType_,
     GInputType_,
     HInputType_,
-    HUpdateInputType_
+    HUpdateInputType_,
+    FinalStateType_
 > {
 public:
     // Type aliases
@@ -31,6 +33,7 @@ public:
     using GElementInput = typename GInputType_::Element;
     using HElementInput = typename HInputType_::Element;
     using HUpdateElementInput = typename HUpdateInputType_::Element;
+    using FinalStateElement = typename FinalStateType_::Element;
 
 
     // using ElementOutput = bfloat16_t;
@@ -88,6 +91,7 @@ public:
         hUbHalfTensor = resource.ubBuf.template GetBufferByByte<half>(H_TENSOR_OFFSET);
         hUpdateUbHalfTensor = resource.ubBuf.template GetBufferByByte<half>(HUPDATE_UB_TENSOR_OFFSET);
 
+        hOutputUbFloatTensor = resource.ubBuf.template GetBufferByByte<float>(HUPDATE_UB_TENSOR_OFFSET);
         hOutputUbTensor = resource.ubBuf.template GetBufferByByte<HElementOutput>(HOUTPUT_UB_TENSOR_OFFSET);
         hOutputUbHalfTensor = resource.ubBuf.template GetBufferByByte<half>(HOUTPUT_UB_TENSOR_OFFSET);
 
@@ -117,13 +121,15 @@ public:
     CATLASS_DEVICE
     void operator()(
         AscendC::GlobalTensor<HElementOutput> hOutput,
+        AscendC::GlobalTensor<FinalStateElement> finalState,
         AscendC::GlobalTensor<float> gInput,
         AscendC::GlobalTensor<HElementInput> hInput,
         AscendC::GlobalTensor<HUpdateElementInput> hUpdateInput,
         uint32_t chunkSize,
         uint32_t kHeadDim,
         uint32_t vHeadDim,
-        Arch::CrossCoreFlag cube2Done
+        Arch::CrossCoreFlag cube2Done,
+        bool isFinalState
     )
     {
         uint32_t mActual = kHeadDim;
@@ -139,6 +145,7 @@ public:
         AscendC::ResetMask();
 
         AscendC::GlobalTensor<HElementOutput> hOutputThisSubBlock = hOutput[offsetH];
+        AscendC::GlobalTensor<FinalStateElement> finalStateThisSubBlock = finalState[offsetH];
         AscendC::GlobalTensor<float> gInputThisSubBlock = gInput;
         AscendC::GlobalTensor<HElementInput> hInputThisSubBlock = hInput[offsetH];
         AscendC::GlobalTensor<HUpdateElementInput> hUpdateInputThisSubBlock = hUpdateInput[offsetH];
@@ -171,28 +178,35 @@ public:
 
         Arch::CrossCoreWaitFlag(cube2Done);
 
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID0);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID0);
         AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID1);
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID1);
         AscendC::DataCopy(hUpdateUbHalfTensor, hUpdateInputThisSubBlock, mActualThisSubBlock * nActual);
         AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID1);
         AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID1);
-        AscendC::Add<half>(hOutputUbHalfTensor, hUbHalfTensor, hUpdateUbHalfTensor, mActualThisSubBlock * nActual);
+        AscendC::Add<half>(hUbHalfTensor, hUbHalfTensor, hUpdateUbHalfTensor, mActualThisSubBlock * nActual);
 
-        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0);
-        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0);
-
-        if constexpr(!std::is_same<HElementOutput, half>::value) {
+        if (isFinalState) {
             AscendC::PipeBarrier<PIPE_V>();
-            AscendC::Cast(floatUbTensor, hOutputUbHalfTensor, AscendC::RoundMode::CAST_NONE, mActualThisSubBlock * nActual);
-            AscendC::PipeBarrier<PIPE_V>();
-            AscendC::Cast(hOutputUbTensor, floatUbTensor, AscendC::RoundMode::CAST_RINT, mActualThisSubBlock * nActual);
+            AscendC::Cast(hOutputUbFloatTensor, hUbHalfTensor, AscendC::RoundMode::CAST_NONE, mActualThisSubBlock * nActual);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
-            AscendC::DataCopy(hOutputThisSubBlock, hOutputUbTensor, mActualThisSubBlock * nActual);
+            AscendC::DataCopy(finalStateThisSubBlock, hOutputUbFloatTensor, mActualThisSubBlock * nActual);
         } else {
-            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
-            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
-            AscendC::DataCopy(hOutputThisSubBlock, hOutputUbHalfTensor, mActualThisSubBlock * nActual);
+            if constexpr(!std::is_same<HElementOutput, half>::value) {
+                AscendC::PipeBarrier<PIPE_V>();
+                AscendC::Cast(floatUbTensor, hUbHalfTensor, AscendC::RoundMode::CAST_NONE, mActualThisSubBlock * nActual);
+                AscendC::PipeBarrier<PIPE_V>();
+                AscendC::Cast(hOutputUbTensor, floatUbTensor, AscendC::RoundMode::CAST_RINT, mActualThisSubBlock * nActual);
+                AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
+                AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
+                AscendC::DataCopy(hOutputThisSubBlock, hOutputUbTensor, mActualThisSubBlock * nActual);
+            } else {
+                AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
+                AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
+                AscendC::DataCopy(hOutputThisSubBlock, hUbHalfTensor, mActualThisSubBlock * nActual);
+            }
         }
     }
 
@@ -204,6 +218,7 @@ private:
     AscendC::LocalTensor<half> hUbHalfTensor;
     AscendC::LocalTensor<half> hUpdateUbHalfTensor;
 
+    AscendC::LocalTensor<float> hOutputUbFloatTensor;
     AscendC::LocalTensor<HElementOutput> hOutputUbTensor;
     AscendC::LocalTensor<half> hOutputUbHalfTensor;
 
