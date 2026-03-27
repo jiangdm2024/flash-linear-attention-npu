@@ -268,17 +268,11 @@ public:
             uint32_t subBlockNum = AscendC::GetSubBlockNum();
 
             AscendC::LocalTensor<half> maskUbTensor = resource.ubBuf.template GetBufferByByte<half>(0);
-            for(uint32_t i = 0; i < chunkSize; ++i)
-            {
-                for(uint32_t j = 0 ; j < chunkSize; ++j)
-                {
-                    if(i>=j) maskUbTensor.SetValue(i*chunkSize+j, (half)1.0);
-                    else maskUbTensor.SetValue(i*chunkSize+j, (half)0.0); 
-                    // maskUbTensor.SetValue(i*chunkSize+j, (half)0.0);
-                }
-            }
-            AscendC::PipeBarrier<PIPE_ALL>();
-
+            AscendC::Duplicate<half>(maskUbTensor, (half)0.0, chunkSize * chunkSize);
+            AscendC::PipeBarrier<PIPE_V>();
+            for(uint32_t i = 0; i < chunkSize; ++ i) AscendC::Duplicate<half>(maskUbTensor[i * chunkSize], (half)1.0, i + 1);
+            AscendC::PipeBarrier<PIPE_V>();
+            
             bool needRun = false;
 
             if (coreIdx < coreNum * subBlockNum) {
