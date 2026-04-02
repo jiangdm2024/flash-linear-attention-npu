@@ -259,8 +259,8 @@ __aicore__ inline void ChunkBwdDvLocalVector<QKVT, GT, Strategy>::ProcessChunk(c
 
         // 根据mask矩阵分割处理当前核分到的chunk行(taskLineNum)
         int64_t curTaskLine = taskStartLine;
-        startSplitMaskId = taskStartLine / MASK_LINE_SIZE;
-        endSplitMaskId = CeilDiv(taskEndLine, MASK_LINE_SIZE);
+        startSplitMaskId = (taskStartLine + 1) / MASK_LINE_SIZE;
+        endSplitMaskId = CeilDiv(taskEndLine + 1, MASK_LINE_SIZE);
         for (int64_t index = startSplitMaskId; index < endSplitMaskId; index++) {
             repeatOffset = (curTaskLine - taskStartLine) * strategy.chunkSize;
             curSize = index == endSplitMaskId - 1 ? taskEndLine - curTaskLine + 1 :
