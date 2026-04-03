@@ -86,29 +86,36 @@ ge::graphStatus Tiling4ChunkFwdO(gert::TilingContext *context)
     auto dtype = context->GetInputTensor(0)->GetDataType();
     uint64_t dataType = dtype == ge::DT_BF16 ? 1 : 0;
 
+    auto gDType = context->GetOptionalInputTensor(INPUT_G_IDX)->GetDataType();
+    int64_t gDataType = 2;
+    if (gDType == ge::DT_BF16) {
+        gDataType = 1;
+    } else if (gDType == ge::DT_FLOAT16) {
+        gDataType = 0;
+    }
+   
     const auto ascendcPlatform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
     uint32_t aicCoreNum = ascendcPlatform.GetCoreNumAic();
     context->SetBlockDim(aicCoreNum);
 
     constexpr size_t WORKSPACE_RSV_BYTE = 16 * 1024 * 1024;
     constexpr size_t GM_ALIGN = 512;
-    constexpr size_t BYTE_SIZE_16_BIT = 2;
     int64_t pingpongStages = 2;
 
     size_t workspaceOffset = ascendcPlatform.GetLibApiWorkSpaceSize();
     workspaceOffset += WORKSPACE_RSV_BYTE;
     
     tiling.set_vWorkspaceOffset(workspaceOffset);
-    workspaceOffset += (aicCoreNum * chunkSize * vHeadDim * BYTE_SIZE_16_BIT * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
+    workspaceOffset += (aicCoreNum * chunkSize * vHeadDim * sizeof(float) * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
 
     tiling.set_hWorkspaceOffset(workspaceOffset);
-    workspaceOffset += (aicCoreNum * chunkSize * vHeadDim * BYTE_SIZE_16_BIT * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
+    workspaceOffset += (aicCoreNum * chunkSize * vHeadDim * sizeof(float) * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
 
     tiling.set_attnWorkspaceOffset(workspaceOffset);
-    workspaceOffset += (aicCoreNum * chunkSize * chunkSize * BYTE_SIZE_16_BIT * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
+    workspaceOffset += (aicCoreNum * chunkSize * chunkSize * sizeof(float) * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
 
     tiling.set_aftermaskWorkspaceOffset(workspaceOffset);
-    workspaceOffset += (aicCoreNum * chunkSize * chunkSize * BYTE_SIZE_16_BIT * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
+    workspaceOffset += (aicCoreNum * chunkSize * chunkSize * sizeof(float) * pingpongStages + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
 
     tiling.set_maskWorkspaceOffset(workspaceOffset);
     workspaceOffset += (chunkSize * chunkSize + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
@@ -128,6 +135,7 @@ ge::graphStatus Tiling4ChunkFwdO(gert::TilingContext *context)
     tiling.set_isVariedLen(isVariedLen);
     tiling.set_tokenBatch(tokenBatch);
     tiling.set_dataType(dataType);
+    tiling.set_gDataType(gDataType);
 
     tiling.SaveToBuffer(context->GetRawTilingData()->GetData(), context->GetRawTilingData()->GetCapacity());
     context->GetRawTilingData()->SetDataSize(tiling.GetDataSize());
