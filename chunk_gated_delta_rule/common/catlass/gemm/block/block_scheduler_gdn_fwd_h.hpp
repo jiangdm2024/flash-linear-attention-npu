@@ -4,6 +4,9 @@ using namespace Catlass;
 #ifndef CATLASS_GEMM_SCHEDULER_GDN_FWD_H_HPP
 #define CATLASS_GEMM_SCHEDULER_GDN_FWD_H_HPP
 
+#define OLD_VER 0
+#define EN_DEBUG 0
+
 // constexpr uint32_t PING_PONG_STAGES = 1;
 constexpr uint32_t PING_PONG_STAGES = 2;
 
@@ -38,12 +41,36 @@ struct GDNFwdHOffsets {
     bool isInitialState;
     bool isFinalState;
     uint32_t blockTokens;
+#if OLD_VER
     bool isDummyHead;
+#endif
     // for debug
     uint32_t batchIdx;
     uint32_t headIdx;
     uint32_t chunkIdx;
 
+};
+
+struct GDNFwdHStream {
+    uint32_t vIdx;
+    uint32_t batchIdx;
+    uint32_t chunkIdx{0};
+    uint32_t vHeadIdx;
+    uint32_t kHeadIdx;
+    uint32_t shapeBatchIdx;
+    uint32_t tokenBatchIdx;
+
+    uint32_t chunkOffset;
+    uint32_t tokenOffset;
+    uint32_t batchChunks{0};
+    uint32_t batchTokens;
+
+    GDNFwdHOffsets offset;
+};
+
+struct GDNFwdHRunningQ {
+    GDNFwdHStream streams[PING_PONG_STAGES];
+    uint32_t head{0};
 };
 
 struct BlockSchedulerGdnFwdH {
@@ -70,11 +97,21 @@ struct BlockSchedulerGdnFwdH {
     uint32_t headGroups;
     uint32_t totalChunks;
     uint32_t totalTokens;
+#if OLD_VER
     uint32_t headInnerLoop;
 
     uint32_t iterId {0};
+#endif    
     bool hasDummyHead;
+
+    GDNFwdHRunningQ runningQ;
+    uint32_t curLoopIdx;
+    uint32_t curLoopTaskBegin;
+    uint32_t curLoopTaskCnt;
+    uint32_t lastLoopTaskCnt;
+
     bool isRunning;
+#if OLD_VER    
     bool processNewTask {true};
     bool firstLoop {true};
     bool lastLoop {false};
@@ -95,7 +132,7 @@ struct BlockSchedulerGdnFwdH {
     uint32_t tokenOffset;
     uint32_t batchChunks;
     uint32_t batchTokens;
-
+#endif
     AscendC::GlobalTensor<int64_t> gmSeqlen;
     AscendC::GlobalTensor<int64_t> gmNumChunks;
 
@@ -134,9 +171,28 @@ struct BlockSchedulerGdnFwdH {
         headGroups = vNumHead / kNumHead;
         hasDummyHead = (taskNum % (PING_PONG_STAGES * cubeCoreNum) <= cubeCoreNum) && (taskNum % (PING_PONG_STAGES * cubeCoreNum) > 0);
         taskLoops = (taskNum + cubeCoreNum * PING_PONG_STAGES - 1) / (cubeCoreNum * PING_PONG_STAGES);
+#if OLD_VER
         headInnerLoop = taskNum > cubeCoreNum ? PING_PONG_STAGES : 1;
         taskIdx = cubeCoreIdx * headInnerLoop;
         isRunning = taskIdx < taskNum;
+#else
+        uint32_t maxTaskCntPerLoop = taskNum > cubeCoreNum ? PING_PONG_STAGES : 1;
+        curLoopTaskBegin = cubeCoreIdx * maxTaskCntPerLoop;
+        uint32_t lastLoopTaskBegin = curLoopTaskBegin + (taskLoops - 1) * maxTaskCntPerLoop * cubeCoreNum;
+        if (lastLoopTaskBegin >= taskNum) {
+            lastLoopTaskCnt = 0;
+        } else {
+            uint32_t maxTaskCntLastLoop = hasDummyHead ? 1 : PING_PONG_STAGES;
+            lastLoopTaskCnt = taskNum - lastLoopTaskBegin;
+            if (lastLoopTaskCnt >= maxTaskCntLastLoop) {
+                lastLoopTaskCnt = maxTaskCntLastLoop;
+            }
+        }
+        curLoopTaskCnt = taskLoops > 1 ? PING_PONG_STAGES : lastLoopTaskCnt;
+        curLoopIdx = -1; // -1: 第一次创建task时会将curLoopIdx加1
+        taskIdx = curLoopTaskBegin + PING_PONG_STAGES; // 第一次创建task时重新初始化taskIdx
+        isRunning = curLoopTaskBegin < taskNum;
+#endif
 
         if (isVariedLen) {
             for (uint32_t b = 1; b <= tokenBatch; b++) {
@@ -149,9 +205,9 @@ struct BlockSchedulerGdnFwdH {
             totalChunks = (seqlen + chunkSize - 1) / chunkSize;
             totalTokens = seqlen;
         }
-        
     }
 
+#if OLD_VER
     CATLASS_DEVICE
     void InitTask() {
         iterId++;
@@ -205,7 +261,84 @@ struct BlockSchedulerGdnFwdH {
             taskIdx = (currLoopIdx + 1) * PING_PONG_STAGES * cubeCoreNum + headInnerLoop * cubeCoreIdx;
         }
     }
+#else
+    CATLASS_DEVICE
+    void InitNewStream(GDNFwdHStream& newStream) {
+        newStream.vIdx = taskIdx / (batch * vNumHead);
+        newStream.batchIdx = (taskIdx - newStream.vIdx * batch * vNumHead) / vNumHead;
+        newStream.vHeadIdx = taskIdx % vNumHead;
+        newStream.kHeadIdx = newStream.vHeadIdx / headGroups;
+        newStream.shapeBatchIdx = isVariedLen ? 0 : newStream.batchIdx;
+        newStream.tokenBatchIdx = isVariedLen ? newStream.batchIdx : 0;
+        newStream.chunkOffset = isVariedLen ? gmNumChunks.GetValue(newStream.tokenBatchIdx) : 0;
+        newStream.batchChunks = isVariedLen ? (gmNumChunks.GetValue(newStream.tokenBatchIdx + 1) - newStream.chunkOffset) : totalChunks;
+        newStream.tokenOffset = isVariedLen ? gmSeqlen.GetValue(newStream.tokenBatchIdx) : 0;
+        newStream.batchTokens = isVariedLen ? (gmSeqlen.GetValue(newStream.tokenBatchIdx + 1) - newStream.tokenOffset) : totalTokens;
+        newStream.chunkIdx = 0;
+    }
 
+    CATLASS_DEVICE
+    void UpdateTask(uint32_t streamId) {
+        auto& stream = runningQ.streams[streamId];
+        auto& offset = stream.offset;
+
+        offset.isInitialState = stream.chunkIdx == 0; 
+        offset.isFinalState = stream.chunkIdx == (stream.batchChunks - 1); 
+        offset.initialStateOffset = (stream.batchIdx * vNumHead + stream.vHeadIdx) * kHeadDim * vHeadDim; 
+        offset.finalStateOffset = (stream.batchIdx * vNumHead + stream.vHeadIdx) * kHeadDim * vHeadDim; 
+        offset.hSrcOffset = (stream.shapeBatchIdx * vNumHead * totalChunks + stream.vHeadIdx * totalChunks + stream.chunkOffset + stream.chunkIdx) * kHeadDim * vHeadDim;
+        offset.hDstOffset = offset.hSrcOffset + kHeadDim * vHeadDim;
+        offset.uvOffset = (stream.shapeBatchIdx * vNumHead * totalTokens + stream.vHeadIdx * totalTokens + stream.tokenOffset + stream.chunkIdx * chunkSize) * vHeadDim;
+        offset.wkOffset = (stream.shapeBatchIdx * kNumHead * totalTokens + stream.kHeadIdx * totalTokens + stream.tokenOffset + stream.chunkIdx * chunkSize) * kHeadDim;
+        offset.wOffset = (stream.shapeBatchIdx * vNumHead * totalTokens + stream.vHeadIdx * totalTokens + stream.tokenOffset + stream.chunkIdx * chunkSize) * kHeadDim;
+        offset.gOffset = stream.shapeBatchIdx * vNumHead * totalTokens + stream.vHeadIdx * totalTokens + stream.tokenOffset + stream.chunkIdx * chunkSize;
+        offset.hWorkOffset = (cubeCoreIdx * PING_PONG_STAGES + streamId) * kHeadDim * vHeadDim;
+        offset.vWorkOffset = (cubeCoreIdx * PING_PONG_STAGES + streamId) * chunkSize * vHeadDim;
+        offset.blockTokens = offset.isFinalState ? (stream.batchTokens - stream.chunkIdx * chunkSize) : chunkSize;
+        offset.batchIdx = stream.batchIdx; 
+        offset.headIdx = stream.vHeadIdx; 
+        offset.chunkIdx = stream.chunkIdx;
+    }
+
+    CATLASS_DEVICE
+    void InitTasks() {
+        auto oldHead = runningQ.head;
+        for (uint32_t i = 0; i < PING_PONG_STAGES; ++i) {
+            auto streamId = (oldHead + i) % PING_PONG_STAGES;
+            auto& stream = runningQ.streams[streamId];
+            stream.chunkIdx += 1;
+            if (StreamIsDone(stream)) {
+                // 当前stream已完成，用一个新stream替换它
+                taskIdx += 1;
+                if (taskIdx >= (curLoopTaskBegin + curLoopTaskCnt)) {
+                    curLoopIdx += 1;
+                    curLoopTaskBegin = curLoopIdx * PING_PONG_STAGES * cubeCoreNum + PING_PONG_STAGES * cubeCoreIdx;
+                    if (curLoopIdx + 1 >= taskLoops) {
+                        curLoopTaskCnt = lastLoopTaskCnt;
+                    }
+                    taskIdx = curLoopTaskBegin;
+                }
+
+                runningQ.head = (streamId + 1) % PING_PONG_STAGES;
+                if (taskIdx < taskNum) {
+                    InitNewStream(stream);
+                    UpdateTask(streamId);
+                } else {
+                    // 没有新stream了，将head推进到下一个未完成的stream上
+                    stream.batchChunks = 0;
+                    for (uint32_t j = 0; StreamIsDone(runningQ.streams[runningQ.head]) && j < PING_PONG_STAGES; ++j) {
+                        runningQ.head = (runningQ.head + j) % PING_PONG_STAGES;
+                    }
+                    isRunning = ! StreamIsDone(runningQ.streams[runningQ.head]);
+                }
+            } else {
+                UpdateTask(streamId);
+            }
+        }
+    }
+#endif
+
+#if OLD_VER
     CATLASS_DEVICE
     GDNFwdHOffsets& GetStage1Offsets() {
         return offsets[currStage];
@@ -227,6 +360,27 @@ struct BlockSchedulerGdnFwdH {
         GDNFwdHOffsets& stage2Offsets = GetStage2Offsets();
         return !(iterId == 1 || (!storeFinalState && stage2Offsets.isFinalState) || stage2Offsets.isDummyHead);
     }
+#else
+    CATLASS_DEVICE
+    const GDNFwdHStream& GetStream(uint32_t i) const {
+        return runningQ.streams[(runningQ.head + i) % PING_PONG_STAGES];
+    }
+
+    CATLASS_DEVICE
+    const GDNFwdHOffsets& GetCurTaskOffsets(const GDNFwdHStream& stream) const {
+        return stream.offset;
+    }
+
+    CATLASS_DEVICE
+    bool StreamIsDone(const GDNFwdHStream& stream) const {
+        return stream.chunkIdx >= stream.batchChunks;
+    }
+
+    CATLASS_DEVICE
+    bool NeedProcessStage2(const GDNFwdHStream& stream) {
+        return storeFinalState || !stream.offset.isFinalState;
+    }
+#endif    
 };
 
 struct BlockSchedulerGdnFwdHCube : public BlockSchedulerGdnFwdH {
